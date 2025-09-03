@@ -641,6 +641,56 @@ def test_doctor():
     assert res.exit_code == 0
 
 
+def test_env_file_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Setup: Create an experiment using the Python SDK
+    # Use local path directly instead of file:// URI to avoid Windows issues
+    test_tracking_uri = str(tmp_path / "mlruns")
+    test_experiment_name = "test_experiment_from_env"
+
+    # Create experiment using SDK
+    mlflow.set_tracking_uri(test_tracking_uri)
+    mlflow.create_experiment(test_experiment_name)
+
+    # Create a test .env file pointing to this tracking URI
+    env_file_path = tmp_path / "test.env"
+    env_file_path.write_text(f"MLFLOW_TRACKING_URI={test_tracking_uri}\n")
+
+    runner = CliRunner()
+
+    # Clear the MLflow environment variables to ensure we're testing the loading
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.delenv("MLFLOW_EXPERIMENT_NAME", raising=False)
+
+    # Ensure variables are not set before running command
+    assert "MLFLOW_TRACKING_URI" not in os.environ
+
+    # Use the existing experiments search CLI command with --env-file
+    result = runner.invoke(
+        cli, ["--env-file", str(env_file_path), "experiments", "search"], catch_exceptions=False
+    )
+
+    # Check that the command executed successfully
+    assert result.exit_code == 0
+
+    # Verify the experiment we created is found (proves env vars were loaded)
+    assert test_experiment_name in result.output
+
+    # Verify the loading message
+    assert "Loaded environment variables from:" in result.output
+    assert str(env_file_path) in result.output
+
+
+def test_env_file_loading_invalid_path() -> None:
+    runner = CliRunner()
+
+    # Test error handling for non-existent file
+    result = runner.invoke(
+        cli, ["--env-file", "nonexistent.env", "experiments", "search"], catch_exceptions=False
+    )
+    assert result.exit_code != 0
+    assert "Environment file 'nonexistent.env' does not exist" in result.output
+
+
 def test_mlflow_gc_with_datasets(sqlite_store):
     store = sqlite_store[0]
 
