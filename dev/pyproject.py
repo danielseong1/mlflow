@@ -371,6 +371,7 @@ def _get_package_data(package_type: PackageType) -> Optional[dict[str, list[str]
             "server/auth/basic_auth.ini",
             "server/auth/db/migrations/alembic.ini",
             "models/notebook_resources/**/*",
+            "ai_commands/**/*.md",
         ]
     }
 
