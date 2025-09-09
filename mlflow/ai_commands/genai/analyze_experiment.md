@@ -58,7 +58,8 @@ Analyzes traces in an MLflow experiment for quality issues, performance problems
   - CLI is working properly (using local MLflow installation)
   - Database connection is valid
 - Extract sample trace IDs for testing
-- Get one full trace with `uv run --env-file <env_file_path> python -m mlflow traces get --trace-id <id>` to understand the data structure
+- Get one full trace by trace_id that has state OK to understand the data structure (errors might not have the structure)
+  - Use: `uv run --env-file <env_file_path> python -m mlflow traces get --trace-id <id>`
 
 ## Step 2: Analysis Phase
 
