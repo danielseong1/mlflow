@@ -64,6 +64,64 @@ def test_build_gunicorn_command():
     ]
 
 
+def test_build_uvicorn_command():
+    assert server._build_uvicorn_command(
+        "", "localhost", "5000", "4", "mlflow.server.fastapi_app:app"
+    ) == [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "--host",
+        "localhost",
+        "--port",
+        "5000",
+        "--workers",
+        "4",
+        "mlflow.server.fastapi_app:app",
+    ]
+
+    # Test with custom uvicorn options
+    assert server._build_uvicorn_command(
+        "--reload --log-level debug", "localhost", "5000", "4", "mlflow.server.fastapi_app:app"
+    ) == [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "--reload",
+        "--log-level",
+        "debug",
+        "--host",
+        "localhost",
+        "--port",
+        "5000",
+        "--workers",
+        "4",
+        "mlflow.server.fastapi_app:app",
+    ]
+
+
+def test_build_uvicorn_command_with_env_file():
+    """Test that uvicorn command includes --env-file when provided."""
+    cmd = server._build_uvicorn_command(
+        uvicorn_opts=None,
+        host="localhost",
+        port=5000,
+        workers=4,
+        app_name="app:app",
+        env_file="/path/to/.env",
+    )
+
+    assert "--env-file" in cmd
+    assert "/path/to/.env" in cmd
+    # Verify the order - env-file should come before the app name
+    env_file_idx = cmd.index("--env-file")
+    env_file_path_idx = cmd.index("/path/to/.env")
+    app_name_idx = cmd.index("app:app")
+    assert env_file_idx < app_name_idx
+    assert env_file_path_idx == env_file_idx + 1
+    assert env_file_path_idx < app_name_idx
+
+
 def test_run_server(mock_exec_cmd):
     """Make sure this runs."""
     with mock.patch("sys.platform", return_value="linux"):

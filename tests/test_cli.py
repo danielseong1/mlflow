@@ -65,6 +65,112 @@ def test_server_static_prefix_validation():
         run_server_mock.assert_not_called()
 
 
+def test_server_uvicorn_options():
+    """Test that uvicorn options are properly handled."""
+    with mock.patch("mlflow.server._run_server") as run_server_mock:
+        # Test default behavior (uvicorn should be used when no server options specified)
+        CliRunner().invoke(server)
+        run_server_mock.assert_called_once_with(
+            file_store_path=mock.ANY,
+            registry_store_uri=mock.ANY,
+            default_artifact_root=mock.ANY,
+            serve_artifacts=mock.ANY,
+            artifacts_only=mock.ANY,
+            artifacts_destination=mock.ANY,
+            host="127.0.0.1",
+            port=5000,
+            static_prefix=None,
+            workers=None,
+            gunicorn_opts=None,
+            waitress_opts=None,
+            expose_prometheus=None,
+            app_name=None,
+            uvicorn_opts=None,
+            env_file=None,
+        )
+
+    with mock.patch("mlflow.server._run_server") as run_server_mock:
+        # Test with uvicorn-opts - use different options than dev mode
+        CliRunner().invoke(server, ["--uvicorn-opts", "--loop asyncio --limit-concurrency 100"])
+        run_server_mock.assert_called_once_with(
+            file_store_path=mock.ANY,
+            registry_store_uri=mock.ANY,
+            default_artifact_root=mock.ANY,
+            serve_artifacts=mock.ANY,
+            artifacts_only=mock.ANY,
+            artifacts_destination=mock.ANY,
+            host="127.0.0.1",
+            port=5000,
+            static_prefix=None,
+            workers=None,
+            gunicorn_opts=None,
+            waitress_opts=None,
+            expose_prometheus=None,
+            app_name=None,
+            uvicorn_opts="--loop asyncio --limit-concurrency 100",
+            env_file=None,
+        )
+
+
+@pytest.mark.skipif(is_windows(), reason="--dev mode is not supported on Windows")
+def test_server_dev_mode():
+    """Test that --dev flag sets proper uvicorn options."""
+    with mock.patch("mlflow.server._run_server") as run_server_mock:
+        # Test with --dev flag (should set uvicorn opts)
+        CliRunner().invoke(server, ["--dev"])
+        run_server_mock.assert_called_once_with(
+            file_store_path=mock.ANY,
+            registry_store_uri=mock.ANY,
+            default_artifact_root=mock.ANY,
+            serve_artifacts=mock.ANY,
+            artifacts_only=mock.ANY,
+            artifacts_destination=mock.ANY,
+            host="127.0.0.1",
+            port=5000,
+            static_prefix=None,
+            workers=None,
+            gunicorn_opts=None,
+            waitress_opts=None,
+            expose_prometheus=None,
+            app_name=None,
+            uvicorn_opts="--reload --log-level debug",
+            env_file=None,
+        )
+
+
+@pytest.mark.skipif(is_windows(), reason="Gunicorn is not supported on Windows")
+def test_server_gunicorn_options():
+    """Test that gunicorn options are properly handled."""
+    with mock.patch("mlflow.server._run_server") as run_server_mock:
+        # Test that gunicorn-opts disables uvicorn
+        CliRunner().invoke(server, ["--gunicorn-opts", "--timeout 120 --max-requests 1000"])
+        run_server_mock.assert_called_once_with(
+            file_store_path=mock.ANY,
+            registry_store_uri=mock.ANY,
+            default_artifact_root=mock.ANY,
+            serve_artifacts=mock.ANY,
+            artifacts_only=mock.ANY,
+            artifacts_destination=mock.ANY,
+            host="127.0.0.1",
+            port=5000,
+            static_prefix=None,
+            workers=None,
+            gunicorn_opts="--timeout 120 --max-requests 1000",
+            waitress_opts=None,
+            expose_prometheus=None,
+            app_name=None,
+            uvicorn_opts=None,
+            env_file=None,
+        )
+
+    # Test conflicting options
+    result = CliRunner().invoke(
+        server, ["--uvicorn-opts", "--reload", "--gunicorn-opts", "--log-level debug"]
+    )
+    assert result.exit_code != 0
+    assert "Cannot specify multiple server options" in result.output
+
+
 def test_server_mlflow_artifacts_options():
     with mock.patch("mlflow.server._run_server") as run_server_mock:
         CliRunner().invoke(server, ["--artifacts-only"])
@@ -690,6 +796,19 @@ def test_env_file_loading_invalid_path() -> None:
     )
     assert result.exit_code != 0
     assert "Environment file 'nonexistent.env' does not exist" in result.output
+
+
+def test_server_with_env_file(tmp_path):
+    """Test that --env-file is passed through to uvicorn."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("TEST_VAR=test_value\n")
+
+    with mock.patch("mlflow.server._run_server") as run_server_mock:
+        result = CliRunner().invoke(cli, ["--env-file", str(env_file), "server"])
+        assert result.exit_code == 0
+        run_server_mock.assert_called_once()
+        # Verify env_file parameter is passed
+        assert run_server_mock.call_args.kwargs["env_file"] == str(env_file)
 
 
 def test_mlflow_gc_with_datasets(sqlite_store):
