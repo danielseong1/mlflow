@@ -69,20 +69,6 @@ export const InsightsLatencyCard = ({ experimentId }: InsightsLatencyCardProps) 
 
   // Transform time series data for chart - show all three percentiles
   // Server now returns timezone-aligned timestamps, no adjustment needed
-  console.log('[DEBUG] Latency Card - Raw time series data:', latencyData.time_series);
-  console.log('[DEBUG] Latency Card - Time bucket type:', timeBucket);
-  console.log('[DEBUG] Latency Card - First few timestamps:', latencyData.time_series.slice(0, 3).map(p => {
-    const date = new Date(p.time_bucket);
-    return {
-      raw: p.time_bucket,
-      utc: date.toISOString(),
-      local: date.toString(),
-      localHour: date.getHours(),
-      localDay: date.getDate(),
-      localDayOfWeek: date.getDay()
-    };
-  }));
-  
   const chartData = [
     ...latencyData.time_series.map(point => ({
       timeBucket: new Date(point.time_bucket),
@@ -132,14 +118,17 @@ export const InsightsLatencyCard = ({ experimentId }: InsightsLatencyCardProps) 
       <div>
         <TrendsLineChart
           points={chartData}
-          yAxisTitle=""
-          yAxisFormat=".0f ms"
+          yAxisTitle="Latency (ms)"
+          yAxisFormat=".0f"
           title="Latency Percentiles Over Time"
           timeBucket={timeBucket}
           height={250}
           xDomain={xDomain}
           lineColors={[PERCENTILE_COLORS.P50, PERCENTILE_COLORS.P90, PERCENTILE_COLORS.P99]}
           showLegend={false}
+          yAxisOptions={{
+            rangemode: 'tozero',
+          }}
         />
       </div>
 
@@ -158,7 +147,6 @@ export const InsightsLatencyCard = ({ experimentId }: InsightsLatencyCardProps) 
             title="High Latency Correlations"
             data={correlations}
             onItemClick={(item) => {
-              console.log('Latency correlation clicked:', item);
               // TODO: Open trace explorer with filter
             }}
           />

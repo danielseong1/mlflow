@@ -2,16 +2,16 @@
 set -e
 
 # Parse command line arguments
-env_file=""
+ENV_FILE_ARG=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --env-file)
-      env_file="$2"
+      ENV_FILE_ARG="--env-file $2"
       shift 2
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 [--env-file <path>]"
+      echo "Usage: $0 [--env-file <path-to-env-file>]"
       exit 1
       ;;
   esac
@@ -33,31 +33,40 @@ function wait_server_ready {
 mkdir -p outputs
 echo 'Running tracking server in the background'
 
-# Handle backend store URI (tracking store)
-if [ -n "$MLFLOW_TRACKING_URI" ]; then
-  backend_store_uri="--backend-store-uri $MLFLOW_TRACKING_URI"
-  default_artifact_root="--default-artifact-root mlruns"
-elif [ -n "$MLFLOW_BACKEND_STORE_URI" ]; then
-  backend_store_uri="--backend-store-uri $MLFLOW_BACKEND_STORE_URI"
-  default_artifact_root="--default-artifact-root mlruns"
-else
+# When using --env-file, don't pass any backend/registry store URIs
+# The mlflow server will read them from the env file
+if [ -n "$ENV_FILE_ARG" ]; then
   backend_store_uri=""
   default_artifact_root=""
-fi
-
-# Handle registry store URI (model registry)
-if [ -n "$MLFLOW_REGISTRY_URI" ]; then
-  registry_store_uri="--registry-store-uri $MLFLOW_REGISTRY_URI"
-else
   registry_store_uri=""
-fi
-
-# Build env file option
-if [ -n "$env_file" ]; then
-  env_file_opt="--env-file $env_file"
-  echo "Using environment file: $env_file"
+  echo "Using environment file configuration"
 else
-  env_file_opt=""
+  # Handle backend store URI (tracking store) from environment
+  if [ -n "$MLFLOW_TRACKING_URI" ]; then
+    backend_store_uri="--backend-store-uri $MLFLOW_TRACKING_URI"
+    default_artifact_root="--default-artifact-root mlruns"
+  elif [ -n "$MLFLOW_BACKEND_STORE_URI" ]; then
+    backend_store_uri="--backend-store-uri $MLFLOW_BACKEND_STORE_URI"
+    default_artifact_root="--default-artifact-root mlruns"
+  else
+    backend_store_uri=""
+    default_artifact_root=""
+  fi
+
+  # Handle registry store URI (model registry) from environment
+  if [ -n "$MLFLOW_REGISTRY_URI" ]; then
+    registry_store_uri="--registry-store-uri $MLFLOW_REGISTRY_URI"
+  else
+    registry_store_uri=""
+  fi
+  
+  # Display configuration
+  echo "MLflow Server Configuration:"
+  echo "  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-<not set>}"
+  echo "  MLFLOW_REGISTRY_URI: ${MLFLOW_REGISTRY_URI:-<not set>}"
+  if [ -n "$DATABRICKS_HOST" ]; then
+    echo "  DATABRICKS_HOST: $DATABRICKS_HOST"
+  fi
 fi
 
 if [ ! -d "mlflow/server/js/node_modules" ]; then
@@ -66,7 +75,8 @@ if [ ! -d "mlflow/server/js/node_modules" ]; then
   popd
 fi
 
-# Pass env-file option to mlflow command (before 'server' subcommand)
-mlflow $env_file_opt server $backend_store_uri $default_artifact_root $registry_store_uri --dev &
+# Run mlflow server with the loaded environment variables
+# Use python -m mlflow to run from local source code
+python -m mlflow $ENV_FILE_ARG server $backend_store_uri $default_artifact_root $registry_store_uri --dev &
 wait_server_ready localhost:5000/health
 yarn --cwd mlflow/server/js start

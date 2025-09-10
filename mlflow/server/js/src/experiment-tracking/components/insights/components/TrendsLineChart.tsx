@@ -80,19 +80,6 @@ export const TrendsLineChart = ({
       config = { ticktext: [], tickvals: [], tickangle: 0 };
     }
     
-    console.log('[DEBUG] TrendsLineChart - Tick Config:', {
-      timeBucket,
-      xDomain,
-      numPoints: points.length,
-      tickvals: config.tickvals,
-      ticktext: config.ticktext,
-      tickangle: config.tickangle,
-      firstFewTicks: config.tickvals?.slice(0, 3)?.map((val, i) => ({
-        val,
-        text: config.ticktext?.[i],
-        date: new Date(val as any).toString()
-      }))
-    });
     
     return config;
   }, [points, timeBucket, xDomain]);

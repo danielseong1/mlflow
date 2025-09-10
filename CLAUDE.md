@@ -22,7 +22,10 @@ MLflow is an open-source platform for managing the end-to-end machine learning l
 # Kill any existing servers
 pkill -f "mlflow server" || true; pkill -f "yarn start" || true
 
-# Start both MLflow backend and React frontend dev servers
+# Option 1: Start with environment variables from .env file (RECOMMENDED)
+nohup uv run bash dev/run-dev-server.sh --env-file .env > /tmp/mlflow-dev-server.log 2>&1 &
+
+# Option 2: Start without .env file (uses system environment variables)
 nohup uv run bash dev/run-dev-server.sh > /tmp/mlflow-dev-server.log 2>&1 &
 
 # Monitor the logs
@@ -33,7 +36,7 @@ tail -f /tmp/mlflow-dev-server.log
 # - React frontend: http://localhost:3000
 ```
 
-This uses `uv` (fast Python package manager) to automatically manage dependencies and run the development environment.
+This uses `uv` (fast Python package manager) to automatically manage dependencies and run the development environment. The `--env-file` option loads environment variables from a specified file.
 
 ### Start Development Server with Databricks Backend
 

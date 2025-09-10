@@ -18,7 +18,7 @@ from click.testing import CliRunner
 
 import mlflow
 from mlflow import pyfunc
-from mlflow.cli import doctor, gc, server
+from mlflow.cli import cli, doctor, gc, server
 from mlflow.data import numpy_dataset
 from mlflow.entities import ViewType
 from mlflow.exceptions import MlflowException

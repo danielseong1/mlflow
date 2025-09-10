@@ -39,6 +39,7 @@ export const InsightsPageTools = ({ experimentId }: InsightsPageToolsProps) => {
   const [showAllUsageTools, setShowAllUsageTools] = useState(false);
   const [showAllLatencyTools, setShowAllLatencyTools] = useState(false);
   
+  
   // Discover all tools in the time window
   const { data: toolsData, isLoading, error } = useToolDiscovery(
     { 
@@ -483,7 +484,7 @@ const ToolRow: React.FC<ToolRowProps> = ({ tool, experimentId }) => {
             
             return {
               timeBucket: date,
-              value: point.count || 0,
+              value: point.usage_count || 0,
             };
           });
           
@@ -623,7 +624,7 @@ const ToolRow: React.FC<ToolRowProps> = ({ tool, experimentId }) => {
                   
                   return {
                     timeBucket: date,
-                    value: point.count > 0 ? (point.error_count / point.count) * 100 : 0,
+                    value: point.usage_count > 0 ? (point.error_count / point.usage_count) * 100 : 0,
                   };
                 })}
                 yAxisTitle="Error Rate (%)"

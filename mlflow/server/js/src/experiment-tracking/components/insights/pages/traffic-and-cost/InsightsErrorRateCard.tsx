@@ -137,7 +137,6 @@ export const InsightsErrorRateCard = ({ experimentId }: InsightsErrorRateCardPro
             title="Error Correlations"
             data={correlations}
             onItemClick={(item) => {
-              console.log('Error correlation clicked:', item);
               // TODO: Open trace explorer with filter
             }}
           />

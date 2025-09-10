@@ -74,11 +74,9 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
             # Build base query
             query = session.query(SqlTraceInfo)
             
-            # Filter by experiment IDs
+            # Filter by experiment IDs (stored as TEXT in database)
             if experiment_ids:
-                query = query.filter(SqlTraceInfo.experiment_id.in_(
-                    [int(eid) for eid in experiment_ids]
-                ))
+                query = query.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
             
             # Apply time filters
             if start_time:
@@ -132,6 +130,37 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
                 func.sum(case((SqlTraceInfo.status == 'ERROR', 1), else_=0)).label('error_count')
             ).group_by('time_bucket').order_by('time_bucket').all()
             
+            # Convert time bucket strings to milliseconds
+            time_series = []
+            if time_series_query:
+                for row in time_series_query:
+                    # Parse the time bucket based on format
+                    if dialect == 'sqlite':
+                        from datetime import datetime
+                        if time_bucket == 'week':
+                            # For week format 'YYYY-WW', convert to first day of that week
+                            year, week = row.time_bucket.split('-')
+                            dt = datetime.strptime(f'{year}-W{week}-1', '%Y-W%W-%w')
+                            timestamp_ms = int(dt.timestamp() * 1000)
+                        elif time_bucket == 'day':
+                            # For day format 'YYYY-MM-DD'
+                            dt = datetime.strptime(row.time_bucket, '%Y-%m-%d')
+                            timestamp_ms = int(dt.timestamp() * 1000)
+                        else:
+                            # For hour format 'YYYY-MM-DD HH:00:00'
+                            dt = datetime.strptime(row.time_bucket, '%Y-%m-%d %H:%M:%S')
+                            timestamp_ms = int(dt.timestamp() * 1000)
+                    else:
+                        # For PostgreSQL/MySQL, the result is already a datetime
+                        timestamp_ms = int(row.time_bucket.timestamp() * 1000)
+                    
+                    time_series.append({
+                        'time_bucket': timestamp_ms,
+                        'count': row.count or 0,
+                        'ok_count': row.ok_count or 0,
+                        'error_count': row.error_count or 0
+                    })
+            
             # Format response
             return {
                 'summary': {
@@ -139,15 +168,7 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
                     'ok_count': summary_query.ok_count or 0 if summary_query else 0,
                     'error_count': summary_query.error_count or 0 if summary_query else 0
                 },
-                'time_series': [
-                    {
-                        'time_bucket': int(row.time_bucket.timestamp() * 1000) if hasattr(row.time_bucket, 'timestamp') else 0,
-                        'count': row.count or 0,
-                        'ok_count': row.ok_count or 0,
-                        'error_count': row.error_count or 0
-                    }
-                    for row in time_series_query
-                ] if time_series_query else []
+                'time_series': time_series
             }
     
     def get_traffic_latency(
@@ -167,11 +188,9 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
                 SqlTraceInfo.execution_time_ms.isnot(None)
             )
             
-            # Filter by experiment IDs
+            # Filter by experiment IDs (stored as TEXT in database)
             if experiment_ids:
-                query = query.filter(SqlTraceInfo.experiment_id.in_(
-                    [int(eid) for eid in experiment_ids]
-                ))
+                query = query.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
             
             # Apply time filters
             if start_time:
@@ -186,25 +205,111 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
                 # Calculate percentiles
                 sorted_times = sorted(execution_times)
                 count = len(sorted_times)
-                p50 = sorted_times[int(count * 0.5)]
-                p95 = sorted_times[int(count * 0.95)]
-                p99 = sorted_times[int(count * 0.99)]
+                p50_idx = min(int(count * 0.5), count - 1)
+                p90_idx = min(int(count * 0.9), count - 1)
+                p99_idx = min(int(count * 0.99), count - 1)
+                p50 = sorted_times[p50_idx]
+                p90 = sorted_times[p90_idx]
+                p99 = sorted_times[p99_idx]
                 avg_latency = sum(sorted_times) / count
+                min_latency = sorted_times[0]
+                max_latency = sorted_times[-1]
             else:
-                p50 = p95 = p99 = avg_latency = None
+                p50 = p90 = p99 = avg_latency = min_latency = max_latency = None
                 count = 0
             
-            # For time series, we'd need to implement percentile calculations per bucket
-            # For now, return empty time series
+            # Get time series data with percentiles per bucket
+            dialect = self._get_dialect()
+            if dialect == 'sqlite':
+                # SQLite time bucketing
+                if time_bucket == 'hour':
+                    bucket_expr = func.strftime('%Y-%m-%d %H:00:00', 
+                                               func.datetime(SqlTraceInfo.timestamp_ms / 1000, 'unixepoch'))
+                elif time_bucket == 'day':
+                    bucket_expr = func.strftime('%Y-%m-%d', 
+                                               func.datetime(SqlTraceInfo.timestamp_ms / 1000, 'unixepoch'))
+                elif time_bucket == 'week':
+                    bucket_expr = func.strftime('%Y-%W', 
+                                               func.datetime(SqlTraceInfo.timestamp_ms / 1000, 'unixepoch'))
+                else:
+                    bucket_expr = func.strftime('%Y-%m-%d %H:00:00', 
+                                               func.datetime(SqlTraceInfo.timestamp_ms / 1000, 'unixepoch'))
+            else:
+                # PostgreSQL/MySQL time bucketing
+                if time_bucket == 'hour':
+                    bucket_expr = func.date_trunc('hour', 
+                                                 func.to_timestamp(SqlTraceInfo.timestamp_ms / 1000))
+                elif time_bucket == 'day':
+                    bucket_expr = func.date_trunc('day', 
+                                                 func.to_timestamp(SqlTraceInfo.timestamp_ms / 1000))
+                elif time_bucket == 'week':
+                    bucket_expr = func.date_trunc('week', 
+                                                 func.to_timestamp(SqlTraceInfo.timestamp_ms / 1000))
+                else:
+                    bucket_expr = func.date_trunc('hour', 
+                                                 func.to_timestamp(SqlTraceInfo.timestamp_ms / 1000))
+            
+            # Get time series with grouped execution times
+            time_series_query = query.with_entities(
+                bucket_expr.label('time_bucket'),
+                SqlTraceInfo.execution_time_ms
+            ).all()
+            
+            # Group by time bucket and calculate percentiles
+            from collections import defaultdict
+            from datetime import datetime
+            
+            time_buckets = defaultdict(list)
+            for row in time_series_query:
+                if dialect == 'sqlite':
+                    # Parse the time bucket string
+                    if time_bucket == 'week':
+                        year, week = row.time_bucket.split('-')
+                        dt = datetime.strptime(f'{year}-W{week}-1', '%Y-W%W-%w')
+                        timestamp_ms = int(dt.timestamp() * 1000)
+                    elif time_bucket == 'day':
+                        dt = datetime.strptime(row.time_bucket, '%Y-%m-%d')
+                        timestamp_ms = int(dt.timestamp() * 1000)
+                    else:
+                        dt = datetime.strptime(row.time_bucket, '%Y-%m-%d %H:%M:%S')
+                        timestamp_ms = int(dt.timestamp() * 1000)
+                else:
+                    timestamp_ms = int(row.time_bucket.timestamp() * 1000)
+                
+                time_buckets[timestamp_ms].append(row.execution_time_ms)
+            
+            # Calculate percentiles for each bucket
+            time_series = []
+            for ts, times in sorted(time_buckets.items()):
+                sorted_bucket_times = sorted(times)
+                bucket_count = len(sorted_bucket_times)
+                if bucket_count > 0:
+                    p50_idx = min(int(bucket_count * 0.5), bucket_count - 1)
+                    p90_idx = min(int(bucket_count * 0.9), bucket_count - 1)
+                    p99_idx = min(int(bucket_count * 0.99), bucket_count - 1)
+                    
+                    time_series.append({
+                        'time_bucket': ts,
+                        'p50_latency': sorted_bucket_times[p50_idx],
+                        'p90_latency': sorted_bucket_times[p90_idx],
+                        'p99_latency': sorted_bucket_times[p99_idx],
+                        'avg_latency': sum(sorted_bucket_times) / bucket_count,
+                        'min_latency': sorted_bucket_times[0],
+                        'max_latency': sorted_bucket_times[-1],
+                        'count': bucket_count
+                    })
+            
+            # Return with correct keys matching API expectations
             return {
                 'summary': {
-                    'p50': p50,
-                    'p95': p95,
-                    'p99': p99,
-                    'avg_latency_ms': avg_latency,
-                    'count': count
+                    'p50_latency': p50,
+                    'p90_latency': p90,
+                    'p99_latency': p99,
+                    'avg_latency': avg_latency,
+                    'min_latency': min_latency,
+                    'max_latency': max_latency
                 },
-                'time_series': []
+                'time_series': time_series
             }
     
     def get_traffic_errors(
@@ -221,11 +326,9 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
             # Build base query
             query = session.query(SqlTraceInfo)
             
-            # Filter by experiment IDs
+            # Filter by experiment IDs (stored as TEXT in database)
             if experiment_ids:
-                query = query.filter(SqlTraceInfo.experiment_id.in_(
-                    [int(eid) for eid in experiment_ids]
-                ))
+                query = query.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
             
             # Apply time filters
             if start_time:
@@ -243,14 +346,84 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
             error_count = summary_query.error_count or 0 if summary_query else 0
             error_rate = (error_count / total_count * 100) if total_count > 0 else 0.0
             
-            # For time series, simplified for now
+            # Build time bucket expression
+            dialect = self._get_dialect()
+            if dialect == 'sqlite':
+                # SQLite time bucketing
+                if time_bucket == 'hour':
+                    bucket_expr = func.strftime('%Y-%m-%d %H:00:00', 
+                                               func.datetime(SqlTraceInfo.timestamp_ms / 1000, 'unixepoch'))
+                elif time_bucket == 'day':
+                    bucket_expr = func.strftime('%Y-%m-%d', 
+                                               func.datetime(SqlTraceInfo.timestamp_ms / 1000, 'unixepoch'))
+                elif time_bucket == 'week':
+                    bucket_expr = func.strftime('%Y-%W', 
+                                               func.datetime(SqlTraceInfo.timestamp_ms / 1000, 'unixepoch'))
+                else:
+                    bucket_expr = func.strftime('%Y-%m-%d %H:00:00', 
+                                               func.datetime(SqlTraceInfo.timestamp_ms / 1000, 'unixepoch'))
+            else:
+                # PostgreSQL/MySQL time bucketing
+                if time_bucket == 'hour':
+                    bucket_expr = func.date_trunc('hour', 
+                                                 func.to_timestamp(SqlTraceInfo.timestamp_ms / 1000))
+                elif time_bucket == 'day':
+                    bucket_expr = func.date_trunc('day', 
+                                                 func.to_timestamp(SqlTraceInfo.timestamp_ms / 1000))
+                elif time_bucket == 'week':
+                    bucket_expr = func.date_trunc('week', 
+                                                 func.to_timestamp(SqlTraceInfo.timestamp_ms / 1000))
+                else:
+                    bucket_expr = func.date_trunc('hour', 
+                                                 func.to_timestamp(SqlTraceInfo.timestamp_ms / 1000))
+            
+            # Get time series data
+            time_series_query = query.with_entities(
+                bucket_expr.label('time_bucket'),
+                func.count().label('total_count'),
+                func.sum(case((SqlTraceInfo.status == 'ERROR', 1), else_=0)).label('error_count')
+            ).group_by('time_bucket').order_by('time_bucket').all()
+            
+            # Convert time bucket strings to milliseconds
+            time_series = []
+            if time_series_query:
+                from datetime import datetime
+                for row in time_series_query:
+                    # Parse the time bucket based on format
+                    if dialect == 'sqlite':
+                        if time_bucket == 'week':
+                            # For week format 'YYYY-WW', convert to first day of that week
+                            year, week = row.time_bucket.split('-')
+                            dt = datetime.strptime(f'{year}-W{week}-1', '%Y-W%W-%w')
+                            timestamp_ms = int(dt.timestamp() * 1000)
+                        elif time_bucket == 'day':
+                            # For day format 'YYYY-MM-DD'
+                            dt = datetime.strptime(row.time_bucket, '%Y-%m-%d')
+                            timestamp_ms = int(dt.timestamp() * 1000)
+                        else:
+                            # For hour format 'YYYY-MM-DD HH:00:00'
+                            dt = datetime.strptime(row.time_bucket, '%Y-%m-%d %H:%M:%S')
+                            timestamp_ms = int(dt.timestamp() * 1000)
+                    else:
+                        # For PostgreSQL/MySQL, the result is already a datetime
+                        timestamp_ms = int(row.time_bucket.timestamp() * 1000)
+                    
+                    total = row.total_count or 0
+                    errors = row.error_count or 0
+                    time_series.append({
+                        'time_bucket': timestamp_ms,
+                        'total_count': total,
+                        'error_count': errors,
+                        'error_rate': (errors / total * 100) if total > 0 else 0.0
+                    })
+            
             return {
                 'summary': {
                     'total_count': total_count,
                     'error_count': error_count,
                     'error_rate': error_rate
                 },
-                'time_series': []
+                'time_series': time_series
             }
     
     # Assessment Methods
@@ -274,11 +447,9 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
                 SqlAssessments.trace_id == SqlTraceInfo.request_id
             )
             
-            # Filter by experiment IDs
+            # Filter by experiment IDs (stored as TEXT in database)
             if experiment_ids:
-                query = query.filter(SqlTraceInfo.experiment_id.in_(
-                    [int(eid) for eid in experiment_ids]
-                ))
+                query = query.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
             
             # Apply time filters
             if start_time:
@@ -322,33 +493,31 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
         """Discover tools used in traces using SQLAlchemy queries."""
         
         with self.ManagedSessionMaker() as session:
-            # Query trace tags for tool information
+            # Query spans for tool information
             query = session.query(
-                SqlTraceTag.value.label('tool_name'),
-                func.count(func.distinct(SqlTraceTag.trace_id)).label('trace_count')
+                SqlSpan.name.label('tool_name'),
+                func.count(func.distinct(SqlSpan.trace_id)).label('trace_count')
             ).join(
                 SqlTraceInfo,
-                SqlTraceTag.trace_id == SqlTraceInfo.request_id
+                SqlSpan.trace_id == SqlTraceInfo.request_id
             ).filter(
-                SqlTraceTag.key == 'mlflow.tool'
+                SqlSpan.type == 'TOOL'
             )
             
-            # Filter by experiment IDs
+            # Filter by experiment IDs (stored as TEXT in database)
             if experiment_ids:
-                query = query.filter(SqlTraceInfo.experiment_id.in_(
-                    [int(eid) for eid in experiment_ids]
-                ))
+                query = query.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
             
-            # Apply time filters
+            # Apply time filters (convert nanoseconds to milliseconds for spans)
             if start_time:
-                query = query.filter(SqlTraceInfo.timestamp_ms >= start_time)
+                query = query.filter(SqlSpan.start_time_unix_nano >= start_time * 1000000)
             if end_time:
-                query = query.filter(SqlTraceInfo.timestamp_ms <= end_time)
+                query = query.filter(SqlSpan.start_time_unix_nano <= end_time * 1000000)
             
             # Group by tool name and filter by min_count
-            results = query.group_by(SqlTraceTag.value).having(
-                func.count(func.distinct(SqlTraceTag.trace_id)) >= min_count
-            ).order_by(func.count(func.distinct(SqlTraceTag.trace_id)).desc()).all()
+            results = query.group_by(SqlSpan.name).having(
+                func.count(func.distinct(SqlSpan.trace_id)) >= min_count
+            ).order_by(func.count(func.distinct(SqlSpan.trace_id)).desc()).all()
             
             # Calculate total traces for percentage
             total_traces_query = session.query(
@@ -364,14 +533,75 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
             
             total_traces = total_traces_query.scalar() or 1
             
-            return [
-                {
+            # Get detailed metrics for each tool
+            tool_details = []
+            for row in results:
+                # Query spans for this specific tool to get metrics
+                tool_spans = session.query(SqlSpan).join(
+                    SqlTraceInfo,
+                    SqlSpan.trace_id == SqlTraceInfo.request_id
+                ).filter(
+                    SqlSpan.type == 'TOOL',
+                    SqlSpan.name == row.tool_name
+                )
+                
+                if experiment_ids:
+                    tool_spans = tool_spans.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
+                
+                if start_time:
+                    tool_spans = tool_spans.filter(SqlSpan.start_time_unix_nano >= start_time * 1000000)
+                if end_time:
+                    tool_spans = tool_spans.filter(SqlSpan.start_time_unix_nano <= end_time * 1000000)
+                
+                spans_list = tool_spans.all()
+                
+                # Calculate metrics
+                total_calls = len(spans_list)
+                error_count = sum(1 for s in spans_list if s.status == 'ERROR')
+                success_count = total_calls - error_count
+                error_rate = (error_count / total_calls * 100) if total_calls > 0 else 0.0
+                
+                # Calculate latencies
+                latencies = []
+                for span in spans_list:
+                    if span.end_time_unix_nano and span.start_time_unix_nano:
+                        latency_ms = (span.end_time_unix_nano - span.start_time_unix_nano) / 1000000
+                        latencies.append(latency_ms)
+                
+                if latencies:
+                    sorted_latencies = sorted(latencies)
+                    count = len(sorted_latencies)
+                    p50_idx = min(int(count * 0.5), count - 1)
+                    p90_idx = min(int(count * 0.9), count - 1)
+                    p99_idx = min(int(count * 0.99), count - 1)
+                    p50 = sorted_latencies[p50_idx]
+                    p90 = sorted_latencies[p90_idx]
+                    p99 = sorted_latencies[p99_idx]
+                    avg_latency = sum(sorted_latencies) / count
+                else:
+                    p50 = p90 = p99 = avg_latency = 0.0
+                
+                # Get first and last seen timestamps
+                first_span = min((s.start_time_unix_nano for s in spans_list), default=0)
+                last_span = max((s.start_time_unix_nano for s in spans_list), default=0)
+                
+                tool_details.append({
                     'tool_name': row.tool_name,
-                    'trace_count': row.trace_count,
+                    'total_calls': total_calls,
+                    'trace_count': row.trace_count,  # Keep for backward compatibility
+                    'success_count': success_count,
+                    'error_count': error_count,
+                    'error_rate': error_rate,
+                    'avg_latency_ms': avg_latency,
+                    'p50_latency_ms': p50,
+                    'p90_latency_ms': p90,
+                    'p99_latency_ms': p99,
+                    'first_seen': str(first_span // 1000000) if first_span else '',  # Convert to ms timestamp string
+                    'last_seen': str(last_span // 1000000) if last_span else '',
                     'percentage': (row.trace_count / total_traces) * 100 if total_traces > 0 else 0
-                }
-                for row in results
-            ]
+                })
+            
+            return tool_details
     
     def get_tool_metrics(
         self,
@@ -382,8 +612,204 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
         time_bucket: str = 'hour',
         timezone: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Get tool metrics - TODO: Implement detailed metrics."""
-        return {'summary': {}, 'time_series': []}
+        """Get metrics for a specific tool including usage count and latency."""
+        with self.ManagedSessionMaker() as session:
+            # Query spans for tool metrics
+            query = session.query(SqlSpan).join(
+                SqlTraceInfo,
+                SqlSpan.trace_id == SqlTraceInfo.request_id
+            ).filter(
+                SqlSpan.type == 'TOOL',
+                SqlSpan.name == tool_name
+            )
+            
+            # Filter by experiment IDs (stored as TEXT in database)
+            if experiment_ids:
+                query = query.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
+            
+            # Apply time filters (convert nanoseconds to milliseconds for spans)
+            if start_time:
+                query = query.filter(SqlSpan.start_time_unix_nano >= start_time * 1000000)
+            if end_time:
+                query = query.filter(SqlSpan.start_time_unix_nano <= end_time * 1000000)
+            
+            # Get all tool spans for metrics calculation
+            tool_spans = query.all()
+            
+            if not tool_spans:
+                return {
+                    'summary': {
+                        'usage_count': 0,
+                        'trace_count': 0,
+                        'avg_latency': None,
+                        'p50_latency': None,
+                        'p90_latency': None,
+                        'p99_latency': None,
+                        'error_rate': 0.0
+                    },
+                    'time_series': []
+                }
+            
+            # Calculate summary metrics
+            usage_count = len(tool_spans)
+            trace_count = len(set(span.trace_id for span in tool_spans))
+            
+            # Calculate latencies (convert nanoseconds to milliseconds)
+            latencies = []
+            error_count = 0
+            for span in tool_spans:
+                if span.status == 'ERROR':
+                    error_count += 1
+                if span.end_time_unix_nano and span.start_time_unix_nano:
+                    latency_ms = (span.end_time_unix_nano - span.start_time_unix_nano) / 1000000
+                    latencies.append(latency_ms)
+            
+            # Calculate percentiles
+            if latencies:
+                sorted_latencies = sorted(latencies)
+                count = len(sorted_latencies)
+                p50_idx = min(int(count * 0.5), count - 1)
+                p90_idx = min(int(count * 0.9), count - 1)
+                p99_idx = min(int(count * 0.99), count - 1)
+                p50 = sorted_latencies[p50_idx]
+                p90 = sorted_latencies[p90_idx]
+                p99 = sorted_latencies[p99_idx]
+                avg_latency = sum(sorted_latencies) / count
+            else:
+                p50 = p90 = p99 = avg_latency = None
+            
+            error_rate = (error_count / usage_count * 100) if usage_count > 0 else 0.0
+            
+            # Build time bucket expression
+            dialect = self._get_dialect()
+            if dialect == 'sqlite':
+                # SQLite time bucketing (convert nanoseconds to seconds for datetime)
+                if time_bucket == 'hour':
+                    bucket_expr = func.strftime('%Y-%m-%d %H:00:00', 
+                                               func.datetime(SqlSpan.start_time_unix_nano / 1000000000, 'unixepoch'))
+                elif time_bucket == 'day':
+                    bucket_expr = func.strftime('%Y-%m-%d', 
+                                               func.datetime(SqlSpan.start_time_unix_nano / 1000000000, 'unixepoch'))
+                elif time_bucket == 'week':
+                    bucket_expr = func.strftime('%Y-%W', 
+                                               func.datetime(SqlSpan.start_time_unix_nano / 1000000000, 'unixepoch'))
+                else:
+                    bucket_expr = func.strftime('%Y-%m-%d %H:00:00', 
+                                               func.datetime(SqlSpan.start_time_unix_nano / 1000000000, 'unixepoch'))
+            else:
+                # PostgreSQL/MySQL time bucketing
+                if time_bucket == 'hour':
+                    bucket_expr = func.date_trunc('hour', 
+                                                 func.to_timestamp(SqlSpan.start_time_unix_nano / 1000000000))
+                elif time_bucket == 'day':
+                    bucket_expr = func.date_trunc('day', 
+                                                 func.to_timestamp(SqlSpan.start_time_unix_nano / 1000000000))
+                elif time_bucket == 'week':
+                    bucket_expr = func.date_trunc('week', 
+                                                 func.to_timestamp(SqlSpan.start_time_unix_nano / 1000000000))
+                else:
+                    bucket_expr = func.date_trunc('hour', 
+                                                 func.to_timestamp(SqlSpan.start_time_unix_nano / 1000000000))
+            
+            # Create a fresh query for time series data
+            time_series_base = session.query(SqlSpan).join(
+                SqlTraceInfo,
+                SqlSpan.trace_id == SqlTraceInfo.request_id
+            ).filter(
+                SqlSpan.type == 'TOOL',
+                SqlSpan.name == tool_name
+            )
+            
+            # Apply the same filters as the main query
+            if experiment_ids:
+                time_series_base = time_series_base.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
+            if start_time:
+                time_series_base = time_series_base.filter(SqlSpan.start_time_unix_nano >= start_time * 1000000)
+            if end_time:
+                time_series_base = time_series_base.filter(SqlSpan.start_time_unix_nano <= end_time * 1000000)
+            
+            # Get time series data with grouped execution times
+            time_series_query = time_series_base.with_entities(
+                bucket_expr.label('time_bucket'),
+                SqlSpan.start_time_unix_nano,
+                SqlSpan.end_time_unix_nano,
+                SqlSpan.status
+            ).all()
+            
+            # Group by time bucket and calculate metrics
+            from collections import defaultdict
+            from datetime import datetime
+            
+            time_buckets = defaultdict(lambda: {'latencies': [], 'count': 0, 'error_count': 0})
+            for row in time_series_query:
+                # Parse the time bucket string
+                if dialect == 'sqlite':
+                    if time_bucket == 'week':
+                        year, week = row.time_bucket.split('-')
+                        dt = datetime.strptime(f'{year}-W{week}-1', '%Y-W%W-%w')
+                        timestamp_ms = int(dt.timestamp() * 1000)
+                    elif time_bucket == 'day':
+                        dt = datetime.strptime(row.time_bucket, '%Y-%m-%d')
+                        timestamp_ms = int(dt.timestamp() * 1000)
+                    else:
+                        dt = datetime.strptime(row.time_bucket, '%Y-%m-%d %H:%M:%S')
+                        timestamp_ms = int(dt.timestamp() * 1000)
+                else:
+                    timestamp_ms = int(row.time_bucket.timestamp() * 1000)
+                
+                time_buckets[timestamp_ms]['count'] += 1
+                if row.status == 'ERROR':
+                    time_buckets[timestamp_ms]['error_count'] += 1
+                
+                if row.end_time_unix_nano and row.start_time_unix_nano:
+                    latency_ms = (row.end_time_unix_nano - row.start_time_unix_nano) / 1000000
+                    time_buckets[timestamp_ms]['latencies'].append(latency_ms)
+            
+            # Calculate percentiles for each bucket
+            time_series = []
+            for ts, data in sorted(time_buckets.items()):
+                bucket_data = {
+                    'time_bucket': ts,
+                    'usage_count': data['count'],
+                    'error_count': data['error_count'],
+                    'error_rate': (data['error_count'] / data['count'] * 100) if data['count'] > 0 else 0.0
+                }
+                
+                if data['latencies']:
+                    sorted_bucket_latencies = sorted(data['latencies'])
+                    bucket_count = len(sorted_bucket_latencies)
+                    p50_idx = min(int(bucket_count * 0.5), bucket_count - 1)
+                    p90_idx = min(int(bucket_count * 0.9), bucket_count - 1)
+                    p99_idx = min(int(bucket_count * 0.99), bucket_count - 1)
+                    
+                    bucket_data.update({
+                        'p50_latency': sorted_bucket_latencies[p50_idx],
+                        'p90_latency': sorted_bucket_latencies[p90_idx],
+                        'p99_latency': sorted_bucket_latencies[p99_idx],
+                        'avg_latency': sum(sorted_bucket_latencies) / bucket_count
+                    })
+                else:
+                    bucket_data.update({
+                        'p50_latency': None,
+                        'p90_latency': None,
+                        'p99_latency': None,
+                        'avg_latency': None
+                    })
+                
+                time_series.append(bucket_data)
+            
+            return {
+                'summary': {
+                    'usage_count': usage_count,
+                    'trace_count': trace_count,
+                    'avg_latency': avg_latency,
+                    'p50_latency': p50,
+                    'p90_latency': p90,
+                    'p99_latency': p99,
+                    'error_rate': error_rate
+                },
+                'time_series': time_series
+            }
     
     # Tag Methods
     
@@ -407,11 +833,9 @@ class InsightsSqlAlchemyStore(InsightsAbstractStore, SqlAlchemyStore):
                 SqlTraceTag.trace_id == SqlTraceInfo.request_id
             )
             
-            # Filter by experiment IDs
+            # Filter by experiment IDs (stored as TEXT in database)
             if experiment_ids:
-                query = query.filter(SqlTraceInfo.experiment_id.in_(
-                    [int(eid) for eid in experiment_ids]
-                ))
+                query = query.filter(SqlTraceInfo.experiment_id.in_(experiment_ids))
             
             # Apply time filters
             if start_time:

@@ -6,6 +6,11 @@ mlruns.db
 mlflow.db
 **/basic_auth.db
 
+# Environment files (NEVER commit these!)
+.env
+.env.local
+.env.*.local
+
 # Mac
 .DS_Store
 
@@ -73,6 +78,7 @@ docs/_build/
 env
 env3
 .env
+.env.*
 .venv
 env/
 venv/

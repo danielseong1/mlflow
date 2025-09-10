@@ -243,8 +243,6 @@ export function useAssessmentData(
     timezone: getUserTimezone(),
   };
 
-  console.log(`[DEBUG] useAssessmentData request for ${assessmentName}:`, request);
-
   return useQuery({
     queryKey: ['trace-insights', 'assessments', 'data', assessmentName, experimentIds, timeBucket, timeRangeFilters.startTime, timeRangeFilters.endTime],
     queryFn: () => postInsightsApi('/assessments/data', request),
@@ -287,6 +285,7 @@ export function useToolDiscovery(
     end_time: request.end_time ?? (timeRangeFilters.endTime ? new Date(timeRangeFilters.endTime).getTime() : null),
   };
 
+
   return useQuery({
     queryKey: ['trace-insights', 'tools', 'discovery', requestWithTimeRange],
     queryFn: () => postInsightsApi('/tools/discovery', requestWithTimeRange),
@@ -313,8 +312,9 @@ export function useToolMetrics(
   };
   time_series: Array<{ 
     time_bucket: number; 
-    count: number; 
-    error_count: number; 
+    usage_count: number; 
+    error_count: number;
+    error_rate: number;
     avg_latency?: number;
     p50_latency?: number;
     p90_latency?: number;
