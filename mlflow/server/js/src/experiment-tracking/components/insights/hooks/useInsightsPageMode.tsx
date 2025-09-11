@@ -1,6 +1,6 @@
 import { useSearchParams } from '../../../../common/utils/RoutingUtils';
 
-export type InsightsPageMode = 'traffic' | 'quality' | 'tools' | 'tags';
+export type InsightsPageMode = 'traffic' | 'quality' | 'tools' | 'tags' | 'ai-analysis';
 
 export const INSIGHTS_SUBPAGE_QUERY_PARAM_KEY = 'insightsSubpage';
 
@@ -29,6 +29,8 @@ export const useInsightsPageMode = (initialMode?: InsightsPageMode): [
     mode = 'tools';
   } else if (urlParam === 'tags') {
     mode = 'tags';
+  } else if (urlParam === 'ai-analysis') {
+    mode = 'ai-analysis';
   } else {
     mode = initialMode || getInsightsPageDefaultMode();
   }

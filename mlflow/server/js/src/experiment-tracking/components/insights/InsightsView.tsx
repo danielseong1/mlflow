@@ -6,11 +6,12 @@
  */
 
 import React from 'react';
-import { useDesignSystemTheme, BarChartIcon, PlusMinusSquareIcon, WrenchIcon, TagIcon } from '@databricks/design-system';
+import { useDesignSystemTheme, BarChartIcon, PlusMinusSquareIcon, WrenchIcon, TagIcon, SparkleFillIcon } from '@databricks/design-system';
 import { InsightsPageTrafficAndCost } from './TrafficAndCost';
 import { InsightsPageQualityMetrics } from './pages/quality-metrics/InsightsPageQualityMetrics';
 import { InsightsPageTools } from './pages/tools/InsightsPageTools';
 import { InsightsPageTags } from './pages/tags/InsightsPageTags';
+import { InsightsPageAIAnalysis } from './pages/ai-analysis/InsightsPageAIAnalysis';
 import { InsightsPageBaseProps } from './types/insightsTypes';
 import { useInsightsPageMode, type InsightsPageMode } from './hooks/useInsightsPageMode';
 import { InsightsTimeConfigProvider } from './hooks/useInsightsTimeContext';
@@ -33,6 +34,7 @@ const navigationItems: NavigationItem[] = [
   { id: 'quality', title: 'Quality metrics', key: 'quality-metrics', icon: <PlusMinusSquareIcon />, implemented: true },
   { id: 'tools', title: 'Tools', key: 'tools', icon: <WrenchIcon />, implemented: true },
   { id: 'tags', title: 'Tags', key: 'tags', icon: <TagIcon />, implemented: true },
+  { id: 'ai-analysis', title: 'AI Analysis', key: 'ai-analysis', icon: <SparkleFillIcon color="ai" />, implemented: true },
 ];
 
 const InsightsViewImpl: React.FC<InsightsViewProps> = ({ experimentId, subpage }) => {
@@ -49,6 +51,8 @@ const InsightsViewImpl: React.FC<InsightsViewProps> = ({ experimentId, subpage }
         return <InsightsPageTools experimentId={experimentId} />;
       case 'tags':
         return <InsightsPageTags experimentId={experimentId} />;
+      case 'ai-analysis':
+        return <InsightsPageAIAnalysis experimentId={experimentId} />;
       default:
         return null;
     }

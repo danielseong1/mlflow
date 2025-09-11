@@ -2072,6 +2072,19 @@ message StartTraceV3 {
   }
 }
 
+message LinkTracesToRun {
+  option (scalapb.message).extends = "com.databricks.rpc.RPC[$this.Response]";
+
+  // IDs of the traces to link to the run.
+  // The maximum number of trace IDs that can be linked in a single request is 100.
+  repeated string trace_ids = 1;
+
+  // ID of the run to link the traces to.
+  optional string run_id = 2 [(validate_required) = true];
+
+  message Response {}
+}
+
 // DatasetSummary. Represents a summary of information about a dataset.
 message DatasetSummary {
   // Unique identifier for the experiment.

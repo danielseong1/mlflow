@@ -92,7 +92,7 @@ export class ArtifactPageImpl extends Component<ArtifactPageImplProps, ArtifactP
     if (activeNodeIsDirectory && !(searchRequest && searchRequest.active)) {
       try {
         // searchModelVersionsApi may be sync or async so we're not using <promise>.catch() syntax
-        await this.props.searchModelVersionsApi({ run_id: runUuid }, this.searchRequestId);
+        await this.props.searchModelVersionsApi({ run_id: runUuid }, this.searchRequestId, 10000);
       } catch (error) {
         // We're not reporting errors more than once when polling
         // in order to avoid flooding logs

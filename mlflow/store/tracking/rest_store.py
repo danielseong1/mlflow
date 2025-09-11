@@ -795,6 +795,26 @@ class RestStore(AbstractStore):
         req_body = message_to_json(RestoreRun(run_id=run_id))
         self._call_endpoint(RestoreRun, req_body)
 
+    def link_traces_to_run(self, trace_ids: list[str], run_id: str) -> None:
+        """
+        Link multiple traces to a run by creating entity associations.
+        """
+        from mlflow.utils.rest_utils import http_request, verify_rest_response
+        
+        # Make direct HTTP call to the endpoint
+        endpoint = "/api/2.0/mlflow/traces/link-to-run"
+        
+        response = http_request(
+            host_creds=self.get_host_creds(),
+            endpoint=endpoint,
+            method="POST",
+            json={
+                "trace_ids": trace_ids,
+                "run_id": run_id
+            }
+        )
+        verify_rest_response(response, endpoint)
+
     def get_experiment_by_name(self, experiment_name):
         try:
             req_body = message_to_json(GetExperimentByName(experiment_name=experiment_name))

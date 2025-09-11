@@ -40,7 +40,7 @@ export const useRunDetailsPageDataLegacy = (runUuid: string, experimentId: strin
   }, [dispatch, experimentId]);
 
   const fetchModelVersions = useCallback(() => {
-    dispatch(searchModelVersionsApi({ run_id: runUuid }));
+    dispatch(searchModelVersionsApi({ run_id: runUuid }, undefined, 10000));
   }, [dispatch, runUuid]);
 
   // Do the initial run & experiment fetch only if it's not in the store already

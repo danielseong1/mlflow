@@ -3418,6 +3418,18 @@ def get_endpoints(get_handler=get_handler):
         correlations_handler,
     )
     
+    # Import agentic handlers
+    from mlflow.server.trace_insights.agentic_rest_handlers import (
+        agentic_analyses_list_handler,
+        agentic_analyses_get_handler,
+        agentic_hypotheses_list_handler,
+        agentic_hypotheses_get_handler,
+        agentic_hypotheses_preview_handler,
+        agentic_issues_list_handler,
+        agentic_issues_get_handler,
+        agentic_issues_preview_handler,
+    )
+    
     # Define trace insights endpoints - matching the UI's expected paths
     trace_insights_endpoints = [
         # Traffic & Cost endpoints
@@ -3443,6 +3455,16 @@ def get_endpoints(get_handler=get_handler):
         (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/correlations"), correlations_handler, ["POST"]),
         (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/dimensions/discovery"), dimension_discovery_handler, ["POST"]),
         (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/dimensions/npmi"), calculate_npmi_handler, ["POST"]),
+        
+        # Agentic Insights endpoints - using /ajax-api/2.0/ prefix for consistency with other insights endpoints
+        (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/agentic/analyses/list"), agentic_analyses_list_handler, ["POST"]),
+        (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/agentic/analyses/get"), agentic_analyses_get_handler, ["POST"]),
+        (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/agentic/hypotheses/list"), agentic_hypotheses_list_handler, ["POST"]),
+        (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/agentic/hypotheses/get"), agentic_hypotheses_get_handler, ["POST"]),
+        (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/agentic/hypotheses/preview"), agentic_hypotheses_preview_handler, ["POST"]),
+        (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/agentic/issues/list"), agentic_issues_list_handler, ["POST"]),
+        (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/agentic/issues/get"), agentic_issues_get_handler, ["POST"]),
+        (_add_static_prefix("/ajax-api/2.0/mlflow/traces/insights/agentic/issues/preview"), agentic_issues_preview_handler, ["POST"]),
     ]
     
     return (

@@ -122,7 +122,7 @@ export class RegisterModelImpl extends React.Component<RegisterModelImplProps, R
 
   reloadModelVersionsForCurrentRun = () => {
     const { runUuid } = this.props;
-    return this.props.searchModelVersionsApi({ run_id: runUuid }, this.searchModelVersionRequestId);
+    return this.props.searchModelVersionsApi({ run_id: runUuid }, this.searchModelVersionRequestId, 10000);
   };
 
   handleRegisterModel = () => {

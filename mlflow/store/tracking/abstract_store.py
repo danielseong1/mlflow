@@ -242,6 +242,16 @@ class AbstractStore:
 
         """
 
+    def link_traces_to_run(self, trace_ids: list[str], run_id: str) -> None:
+        """
+        Link multiple traces to a run by creating entity associations.
+
+        Args:
+            trace_ids: List of trace IDs to link to the run.
+            run_id: ID of the run to link traces to.
+        """
+        raise NotImplementedError
+
     def start_trace(self, trace_info: TraceInfo) -> TraceInfo:
         """
         Create a trace using the V3 API format with a complete Trace object.

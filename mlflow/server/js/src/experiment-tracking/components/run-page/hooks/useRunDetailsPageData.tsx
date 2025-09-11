@@ -126,7 +126,7 @@ export const useRunDetailsPageData = ({
       if (shouldEnableGraphQLModelVersionsForRunDetails()) {
         return;
       }
-      dispatch(searchModelVersionsApi({ run_id: runUuid }));
+      dispatch(searchModelVersionsApi({ run_id: runUuid }, undefined, 10000));
     }, [dispatch, runUuid]);
 
     const { latestMetrics, tags, params, datasets } = useMemo(() => {

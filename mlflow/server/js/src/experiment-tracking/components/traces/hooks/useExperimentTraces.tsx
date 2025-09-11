@@ -7,7 +7,7 @@ import { first, uniq, values } from 'lodash';
 import { RunEntity } from '../../../types';
 
 // A filter expression used to filter traces by run ID
-const RUN_ID_FILTER_EXPRESSION = 'request_metadata.`mlflow.sourceRun`';
+const RUN_ID_FILTER_EXPRESSION = 'attributes.run_id';
 const LOGGED_MODEL_ID_FILTER_EXPRESSION = 'request_metadata.`mlflow.modelId`';
 
 const createRunIdsFilterExpression = (runUuids: string[]) => {
