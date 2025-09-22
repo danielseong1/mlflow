@@ -4,6 +4,7 @@ Utility functions for MLflow Insights.
 
 import os
 import tempfile
+from datetime import datetime
 from typing import Optional
 
 import yaml
@@ -138,3 +139,80 @@ def get_experiment_for_run(client: MlflowClient, run_id: str) -> Optional[str]:
         return run.info.experiment_id
     except Exception:
         return None
+
+
+def delete_yaml_file(client: MlflowClient, run_id: str, filename: str) -> bool:
+    """
+    Delete a YAML file from the insights/ artifact directory.
+
+    Args:
+        client: MLflow client
+        run_id: Run ID to delete artifact from
+        filename: Name of the YAML file (e.g., 'analysis.yaml')
+
+    Returns:
+        True if deletion was successful, False otherwise
+    """
+    try:
+        # Get the artifact repository for this run
+        run = client.get_run(run_id)
+        artifact_repo = client._get_artifact_repository(run.info.artifact_uri)
+
+        # Delete the specific file in the insights directory
+        artifact_path = f"insights/{filename}"
+        artifact_repo.delete_artifacts(artifact_path)
+
+        return True
+    except Exception:
+        return False
+
+
+def save_sql_queries_to_yaml(run_id: str, sql_query: str) -> None:
+    """
+    Log a SQL query to the sql_queries.yaml artifact in append-only mode.
+
+    Args:
+        run_id: Run ID to log the query to
+        sql_query: SQL query string to log
+    """
+    client = MlflowClient()
+    filename = "sql_queries.yaml"
+    queries_list = []
+
+    # Try to load existing queries
+    try:
+        # Get existing artifact content
+        artifact_path = f"insights/{filename}"
+        local_path = client.download_artifacts(run_id, artifact_path)
+
+        with open(local_path, 'r') as f:
+            existing_data = yaml.safe_load(f) or []
+            if isinstance(existing_data, list):
+                queries_list = existing_data
+    except Exception:
+        # File doesn't exist yet, start with empty list
+        pass
+
+    # Append new query with timestamp
+    new_query = {
+        "timestamp": datetime.now().isoformat(),
+        "query": sql_query
+    }
+    queries_list.append(new_query)
+
+    # Save back to artifact
+    temp_dir = tempfile.mkdtemp()
+    temp_path = os.path.join(temp_dir, filename)
+
+    try:
+        with open(temp_path, 'w') as f:
+            yaml.safe_dump(queries_list, f, default_flow_style=False, sort_keys=False)
+
+        # Log artifact to insights directory
+        client.log_artifact(run_id, temp_path, "insights")
+    finally:
+        # Clean up
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        if os.path.exists(temp_dir):
+            os.rmdir(temp_dir)

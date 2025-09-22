@@ -96,6 +96,7 @@ class TestInsightsClient:
         hypothesis_id = client.create_hypothesis(
             insights_run_id="analysis-run-id",
             statement="Database locks cause timeouts",
+            rationale="Investigating database connection timeouts observed in production",
             testing_plan="To test this hypothesis, I will search for traces with execution_time > 30s and look for database lock messages. Supporting evidence would include lock wait timeouts. To refute, I'll find slow traces without DB operations. Threshold: >70% correlation validates.",
             evidence=evidence,
         )
@@ -136,6 +137,7 @@ class TestInsightsClient:
             client.create_hypothesis(
                 insights_run_id="analysis-run-id",
                 statement="Database locks cause timeouts",
+                rationale="Test rationale",
                 # Missing testing_plan - this is required!
             )
         assert "testing_plan" in str(exc_info.value)
@@ -200,6 +202,7 @@ class TestInsightsClient:
         hypothesis_data = {
             "hypothesis_id": "hyp-123",
             "statement": "Original statement",
+            "rationale": "Original rationale",
             "testing_plan": "Original plan",
             "status": "TESTING",
             "evidence": [],
@@ -317,6 +320,7 @@ class TestInsightsClient:
         hypothesis_data = {
             "hypothesis_id": "hyp-123",
             "statement": "Test",
+            "rationale": "Test rationale",
             "testing_plan": "Test plan",
             "status": "TESTING",
             "evidence": [
@@ -380,6 +384,7 @@ class TestInsightsClient:
             client.create_hypothesis(
                 insights_run_id="analysis-run-id",
                 statement="Test",
+                rationale="Test rationale",
                 testing_plan="Test plan",
                 evidence=[{"trace_id": "tr-001"}],  # Missing rationale
             )
@@ -390,6 +395,7 @@ class TestInsightsClient:
             client.create_hypothesis(
                 insights_run_id="analysis-run-id",
                 statement="Test",
+                rationale="Test rationale",
                 testing_plan="Test plan",
                 evidence=["not a dict"],  # Wrong type
             )

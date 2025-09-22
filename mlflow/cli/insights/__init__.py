@@ -82,27 +82,30 @@ def create_analysis(
 @commands.command("create-hypothesis")
 @RUN_ID
 @click.option("--statement", type=click.STRING, required=True, help="Hypothesis statement to test")
+@click.option("--rationale", type=click.STRING, required=True, help="Detailed rationale for the hypothesis")
 @click.option("--testing-plan", type=click.STRING, required=True, help="Detailed plan for testing the hypothesis")
 @click.option("--evidence", multiple=True, help="Evidence as JSON dict with trace_id, rationale, and supports fields")
 def create_hypothesis(
     run_id: str,
     statement: str,
+    rationale: str,
     testing_plan: str,
-    evidence: tuple[str, ...]
+    evidence: tuple[str, ...],
 ) -> None:
     """
     Create a new hypothesis within an analysis.
-    
+
     Example:
         mlflow insights create-hypothesis \\
             --run-id abc123 \\
             --statement "Database locks cause timeouts" \\
+            --rationale "Investigation into database connection timeouts" \\
             --testing-plan "Search for traces with timeout errors..." \\
             --evidence '{"trace_id": "tr-001", "rationale": "Shows lock timeout", "supports": true}' \\
-            --evidence '{"trace_id": "tr-002", "rationale": "No DB involvement", "supports": false}'
+            --evidence '{"trace_id": "tr-002", "rationale": "No DB involvement", "supports": false}' \\
     """
     client = InsightsClient()
-    
+
     # Parse evidence JSON
     evidence_list = []
     for ev_str in evidence:
@@ -111,15 +114,16 @@ def create_hypothesis(
             evidence_list.append(ev)
         except json.JSONDecodeError as e:
             raise click.UsageError(f"Invalid JSON in evidence: {ev_str}. Error: {e}")
-    
+
     # Create hypothesis
     hypothesis_id = client.create_hypothesis(
         insights_run_id=run_id,
         statement=statement,
+        rationale=rationale,
         testing_plan=testing_plan,
-        evidence=evidence_list if evidence_list else None
+        evidence=evidence_list if evidence_list else None,
     )
-    
+
     click.echo(f"Created hypothesis with ID: {hypothesis_id}")
     if evidence_list:
         click.echo(f"Added {len(evidence_list)} evidence entries")
@@ -181,6 +185,50 @@ def create_issue(
         click.echo(f"Added {len(evidence_list)} evidence entries")
 
 
+@commands.command("create-baseline-census")
+@RUN_ID
+@click.option("--table-name", envvar="MLFLOW_TRACE_TABLE_NAME", type=click.STRING, help="Name of the trace table to analyze. Can be set via MLFLOW_TRACE_TABLE_NAME env var.")
+def create_baseline_census(
+    run_id: str,
+    table_name: str
+) -> None:
+    """
+    Create a baseline census from trace analysis data.
+
+    This command analyzes a trace table and generates a comprehensive baseline
+    census YAML file containing performance metrics, error categories, and trends.
+
+    Examples:
+        # Using command line argument
+        mlflow insights create-baseline-census \\
+            --run-id abc123 \\
+            --table-name ds_fs.agent_quality.sample_agent_trace_archival
+
+        # Using environment variable
+        export MLFLOW_TRACE_TABLE_NAME=ds_fs.agent_quality.sample_agent_trace_archival
+        mlflow insights create-baseline-census --run-id abc123
+    """
+    if not table_name:
+        raise click.UsageError("--table-name is required or set MLFLOW_TRACE_TABLE_NAME env var")
+
+    client = InsightsClient()
+
+    try:
+        # Create baseline census
+        filename = client.create_baseline_census(
+            insights_run_id=run_id,
+            table_name=table_name
+        )
+
+        click.echo(f"Created baseline census: {filename}")
+        click.echo(f"Run ID: {run_id}")
+        click.echo(f"Table: {table_name}")
+
+    except Exception as e:
+        click.echo(f"Error creating baseline census: {e}", err=True)
+        raise click.Abort()
+
+
 # ============================================================================
 # Update Commands
 # ============================================================================
@@ -215,27 +263,30 @@ def update_analysis(
 @RUN_ID
 @click.option("--hypothesis-id", type=click.STRING, required=True, help="Hypothesis ID to update")
 @click.option("--status", type=click.Choice(["TESTING", "VALIDATED", "REJECTED"]), help="Update hypothesis status")
+@click.option("--rationale", type=click.STRING, help="Update hypothesis rationale")
 @click.option("--evidence", multiple=True, help="Additional evidence as JSON dict")
 @click.option("--testing-plan", type=click.STRING, help="Update testing plan")
 def update_hypothesis(
     run_id: str,
     hypothesis_id: str,
     status: Optional[str],
+    rationale: Optional[str],
     evidence: tuple[str, ...],
     testing_plan: Optional[str]
 ) -> None:
     """
     Update an existing hypothesis.
-    
+
     Example:
         mlflow insights update-hypothesis \\
             --run-id abc123 \\
             --hypothesis-id xyz789 \\
             --status VALIDATED \\
-            --evidence '{"trace_id": "tr-003", "rationale": "Additional evidence", "supports": true}'
+            --rationale "Updated investigation details" \\
+            --evidence '{"trace_id": "tr-003", "rationale": "Additional evidence", "supports": true}' \\
     """
     client = InsightsClient()
-    
+
     # Parse evidence JSON
     evidence_list = []
     for ev_str in evidence:
@@ -244,15 +295,16 @@ def update_hypothesis(
             evidence_list.append(ev)
         except json.JSONDecodeError as e:
             raise click.UsageError(f"Invalid JSON in evidence: {ev_str}. Error: {e}")
-    
+
     client.update_hypothesis(
         insights_run_id=run_id,
         hypothesis_id=hypothesis_id,
         status=status,
+        rationale=rationale,
         evidence=evidence_list if evidence_list else None,
         testing_plan=testing_plan
     )
-    
+
     click.echo(f"Updated hypothesis {hypothesis_id}")
     if evidence_list:
         click.echo(f"Added {len(evidence_list)} new evidence entries")
@@ -376,15 +428,15 @@ def list_hypotheses(run_id: str, output: str) -> None:
             supports = h.supports_count if hasattr(h, 'supports_count') else 0
             refutes = h.refutes_count if hasattr(h, 'refutes_count') else 0
             evidence_str = f"+{supports}/-{refutes}" if (supports or refutes) else str(h.evidence_count)
-            
+
             table.append([
                 h.hypothesis_id[:8] + "...",
-                h.statement[:40] + "..." if len(h.statement) > 40 else h.statement,
+                h.statement[:30] + "..." if len(h.statement) > 30 else h.statement,
                 h.status.value,
                 str(h.trace_count),
                 evidence_str,
             ])
-        
+
         headers = ["ID", "Statement", "Status", "Traces", "Evidence"]
         click.echo(_create_table(table, headers=headers))
 
@@ -470,12 +522,13 @@ def get_hypothesis(run_id: str, hypothesis_id: str, output: str) -> None:
     else:
         click.echo(f"\nHypothesis ID: {hypothesis.hypothesis_id}")
         click.echo(f"Statement: {hypothesis.statement}")
+        click.echo(f"Rationale: {hypothesis.rationale}")
         click.echo(f"Testing Plan: {hypothesis.testing_plan}")
         click.echo(f"Status: {hypothesis.status.value}")
-        click.echo(f"Traces: {len(hypothesis.trace_ids)}")
+        click.echo(f"Traces: {hypothesis.trace_count}")
         click.echo(f"Created: {hypothesis.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
         click.echo(f"Updated: {hypothesis.updated_at.strftime('%Y-%m-%d %H:%M:%S')}")
-        
+
         if hypothesis.evidence:
             click.echo(f"\nEvidence ({len(hypothesis.evidence)} entries):")
             for i, ev in enumerate(hypothesis.evidence[:5], 1):
@@ -483,7 +536,7 @@ def get_hypothesis(run_id: str, hypothesis_id: str, output: str) -> None:
                 click.echo(f"  {i}. [{support_str}] {ev.trace_id}: {ev.rationale[:60]}...")
             if len(hypothesis.evidence) > 5:
                 click.echo(f"  ... and {len(hypothesis.evidence) - 5} more")
-        
+
         if hypothesis.metrics:
             click.echo(f"\nMetrics: {json.dumps(hypothesis.metrics, indent=2)}")
 
@@ -585,6 +638,140 @@ def preview_hypotheses(run_id: str, max_traces: int, output: str) -> None:
             click.echo(f"\n... and {len(traces) - 10} more traces")
 
 
+# ============================================================================
+# Baseline Census Commands
+# ============================================================================
+
+@commands.command("get-baseline-census")
+@RUN_ID
+@click.option("--output", type=click.Choice(["table", "json"]), default="table", help="Output format")
+def get_baseline_census(run_id: str, output: str) -> None:
+    """
+    Get baseline census details for a run.
+
+    Example:
+        mlflow insights get-baseline-census --run-id abc123
+    """
+    client = InsightsClient()
+
+    census = client.get_baseline_census(insights_run_id=run_id)
+    if not census:
+        raise click.ClickException(f"No baseline census found in run {run_id}")
+
+    if output == "json":
+        click.echo(json.dumps(census.model_dump(mode="json"), indent=2))
+    else:
+        # Table output
+        click.echo(f"\nBaseline Census for Run: {run_id}")
+        click.echo("=" * 50)
+        click.echo(f"Table: {census.metadata.table_name}")
+        click.echo(f"Created: {census.metadata.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+        click.echo(f"Time Range: {census.operational_metrics.first_trace_timestamp} to {census.operational_metrics.last_trace_timestamp}")
+        click.echo()
+
+        # Basic counts
+        click.echo("TRACE COUNTS:")
+        click.echo(f"  Total Traces: {census.operational_metrics.total_traces}")
+        click.echo(f"  OK Count: {census.operational_metrics.ok_count}")
+        click.echo(f"  Error Count: {census.operational_metrics.error_count}")
+        click.echo(f"  Error Rate: {census.operational_metrics.error_rate}%")
+        click.echo()
+
+        # Latency metrics
+        click.echo("LATENCY METRICS (ms):")
+        click.echo(f"  P50: {census.operational_metrics.p50_latency_ms}")
+        click.echo(f"  P90: {census.operational_metrics.p90_latency_ms}")
+        click.echo(f"  P95: {census.operational_metrics.p95_latency_ms}")
+        click.echo(f"  P99: {census.operational_metrics.p99_latency_ms}")
+        click.echo(f"  Max: {census.operational_metrics.max_latency_ms}")
+        click.echo()
+
+        # Top error categories
+        if census.operational_metrics.top_error_spans:
+            click.echo("TOP ERROR CATEGORIES:")
+            for error in census.operational_metrics.top_error_spans[:5]:
+                click.echo(f"  {error.get('error_span_name', 'Unknown')}: {error.get('count', 0)} ({error.get('pct_of_errors', 0)}%)")
+            click.echo()
+
+        # Top slow tools
+        if census.operational_metrics.top_slow_tools:
+            click.echo("TOP SLOW TOOLS:")
+            for tool in census.operational_metrics.top_slow_tools[:5]:
+                click.echo(f"  {tool.get('tool_span_name', 'Unknown')}: P95={tool.get('p95_latency_ms', 0)}ms, Count={tool.get('count', 0)}")
+            click.echo()
+
+        # Time buckets
+        if census.operational_metrics.time_buckets:
+            click.echo(f"TIME BUCKETS ({len(census.operational_metrics.time_buckets)} total):")
+            for bucket in census.operational_metrics.time_buckets[:3]:
+                click.echo(f"  {bucket.get('time_bucket', 'Unknown')}: {bucket.get('total_traces', 0)} traces, {bucket.get('error_rate', 0)}% error rate")
+            if len(census.operational_metrics.time_buckets) > 3:
+                click.echo(f"  ... and {len(census.operational_metrics.time_buckets) - 3} more buckets")
+
+
+@commands.command("update-baseline-census")
+@RUN_ID
+@click.option("--table-name", envvar="MLFLOW_TRACE_TABLE_NAME", type=click.STRING, help="Update the table name for the census. Can be set via MLFLOW_TRACE_TABLE_NAME env var.")
+@click.option("--metadata", type=click.STRING, help="Additional metadata as JSON string")
+@click.option("--regenerate", is_flag=True, help="Regenerate all census data from the table (requires --table-name)")
+def update_baseline_census(
+    run_id: str,
+    table_name: Optional[str],
+    metadata: Optional[str],
+    regenerate: bool
+) -> None:
+    """
+    Update an existing baseline census.
+
+    Examples:
+        # Update metadata
+        mlflow insights update-baseline-census \\
+            --run-id abc123 \\
+            --metadata '{"environment": "production", "version": "1.2.0"}'
+
+        # Regenerate entire census with new table
+        mlflow insights update-baseline-census \\
+            --run-id abc123 \\
+            --table-name new_table_name \\
+            --regenerate
+    """
+    client = InsightsClient()
+
+    try:
+        # Parse metadata if provided
+        metadata_dict = None
+        if metadata:
+            try:
+                metadata_dict = json.loads(metadata)
+            except json.JSONDecodeError as e:
+                raise click.UsageError(f"Invalid JSON in metadata: {metadata}. Error: {e}")
+
+        # Validate regenerate flag
+        if regenerate and not table_name:
+            raise click.UsageError("--regenerate requires --table-name to be specified")
+
+        # Update census
+        filename = client.update_baseline_census(
+            insights_run_id=run_id,
+            table_name=table_name,
+            metadata=metadata_dict,
+            regenerate=regenerate
+        )
+
+        click.echo(f"Updated baseline census: {filename}")
+        click.echo(f"Run ID: {run_id}")
+        if table_name:
+            click.echo(f"Table: {table_name}")
+        if regenerate:
+            click.echo("Regenerated all census data")
+        if metadata_dict:
+            click.echo(f"Added metadata: {list(metadata_dict.keys())}")
+
+    except Exception as e:
+        click.echo(f"Error updating baseline census: {e}", err=True)
+        raise click.Abort()
+
+
 @commands.command("preview-issues")
 @EXPERIMENT_ID
 @click.option("--max-traces", type=click.INT, default=100, help="Maximum traces to fetch")
@@ -645,3 +832,90 @@ def preview_issues(experiment_id: Optional[str], max_traces: int, output: str) -
         
         if len(traces) > 10:
             click.echo(f"\n... and {len(traces) - 10} more traces")
+
+
+# ============================================================================
+# Baseline Census Commands
+# ============================================================================
+
+@commands.command("get-baseline-census")
+@RUN_ID
+@click.option("--output", type=click.Choice(["json"]), default="json", help="Output format")
+def get_baseline_census(run_id: str, output: str) -> None:
+    """
+    Get baseline census details for a run.
+
+    Example:
+        mlflow insights get-baseline-census --run-id abc123
+    """
+    client = InsightsClient()
+
+    census = client.get_baseline_census(insights_run_id=run_id)
+    if not census:
+        raise click.ClickException(f"No baseline census found in run {run_id}")
+
+    if output == "json":
+        click.echo(json.dumps(census.model_dump(mode="json"), indent=2))
+    
+
+@commands.command("update-baseline-census")
+@RUN_ID
+@click.option("--table-name", envvar="MLFLOW_TRACE_TABLE_NAME", type=click.STRING, help="Update the table name for the census. Can be set via MLFLOW_TRACE_TABLE_NAME env var.")
+@click.option("--metadata", type=click.STRING, help="Additional metadata as JSON string")
+@click.option("--regenerate", is_flag=True, help="Regenerate all census data from the table (requires --table-name)")
+def update_baseline_census(
+    run_id: str,
+    table_name: Optional[str],
+    metadata: Optional[str],
+    regenerate: bool
+) -> None:
+    """
+    Update an existing baseline census.
+
+    Examples:
+        # Update metadata
+        mlflow insights update-baseline-census \\
+            --run-id abc123 \\
+            --metadata '{"environment": "production", "version": "1.2.0"}'
+
+        # Regenerate entire census with new table
+        mlflow insights update-baseline-census \\
+            --run-id abc123 \\
+            --table-name new_table_name \\
+            --regenerate
+    """
+    client = InsightsClient()
+
+    try:
+        # Parse metadata if provided
+        metadata_dict = None
+        if metadata:
+            try:
+                metadata_dict = json.loads(metadata)
+            except json.JSONDecodeError as e:
+                raise click.UsageError(f"Invalid JSON in metadata: {metadata}. Error: {e}")
+
+        # Validate regenerate flag
+        if regenerate and not table_name:
+            raise click.UsageError("--regenerate requires --table-name to be specified")
+
+        # Update census
+        filename = client.update_baseline_census(
+            insights_run_id=run_id,
+            table_name=table_name,
+            metadata=metadata_dict,
+            regenerate=regenerate
+        )
+
+        click.echo(f"Updated baseline census: {filename}")
+        click.echo(f"Run ID: {run_id}")
+        if table_name:
+            click.echo(f"Table: {table_name}")
+        if regenerate:
+            click.echo("Regenerated all census data")
+        if metadata_dict:
+            click.echo(f"Added metadata: {list(metadata_dict.keys())}")
+
+    except Exception as e:
+        click.echo(f"Error updating baseline census: {e}", err=True)
+        raise click.Abort()

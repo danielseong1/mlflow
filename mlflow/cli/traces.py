@@ -64,7 +64,6 @@ For detailed help on any command, use:
 import json
 
 import click
-
 from mlflow.entities import AssessmentSource, AssessmentSourceType
 from mlflow.environment_variables import MLFLOW_EXPERIMENT_ID
 from mlflow.tracing.assessment import (
@@ -972,3 +971,226 @@ def calculate_correlation(
                 if result.filter_string2_count > 0:
                     conditional_pct = (result.joint_count / result.filter_string2_count) * 100
                     click.echo(f"• Of traces matching Filter 2, {conditional_pct:.1f}% also match Filter 1")
+
+
+@commands.command("execute-sql")
+@click.option(
+    "--sql",
+    type=click.STRING,
+    required=True,
+    help="Databricks SQL query string to execute against traces delta table"
+)
+@click.option(
+    "--output",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format: 'table' for formatted table (default) or 'json' for JSON format"
+)
+@click.option(
+    "--run-id",
+    type=click.STRING,
+    required=True,
+    help="MLflow run ID to log the SQL query to as a YAML artifact"
+)
+def execute_sql(sql: str, output: str, run_id: str) -> None:
+    """
+    Execute a raw Databricks SQL query against the Databricks traces delta table.
+
+    TABLE SCHEMA:
+
+    SIMPLE COLUMNS:
+    - trace_id: STRING - Unique trace identifier (format: tr-*)
+    - client_request_id: STRING - Optional client-provided request ID
+    - request_time: TIMESTAMP - When trace was created
+    - state: STRING - Trace status ('OK' or 'ERROR')
+    - execution_duration_ms: BIGINT - Total execution time in milliseconds
+    - request: STRING - Full input content/prompt
+    - response: STRING - Full output/response content
+    - request_preview: STRING - Truncated version of request
+    - response_preview: STRING - Truncated version of response
+
+    MAP COLUMNS (access with bracket notation: column_name['key']):
+    - trace_metadata: MAP<STRING, STRING>
+        Common keys: 'mlflow.traceInputs', 'mlflow.traceOutputs', 'mlflow.user', 'mlflow.trace_schema'
+        Example: trace_metadata['mlflow.traceOutputs']
+    - tags: MAP<STRING, STRING>
+        Common keys: 'mlflow.traceName', 'mlflow.user', 'mlflow.artifactLocation'
+        Example: tags['mlflow.traceName']
+
+    STRUCT COLUMNS:
+    - trace_location: STRUCT
+        Contains MLflow experiment/table location information
+
+    ARRAY COLUMNS (use LATERAL VIEW explode or filter() functions):
+    - spans: ARRAY<STRUCT>
+        Each span contains:
+        - name: STRING - Span name
+        - span_id: STRING - Span identifier
+        - trace_id: STRING - Parent trace ID
+        - parent_id: STRING - Parent span ID (empty for root span)
+        - start_time: BIGINT - Start timestamp (nanoseconds)
+        - end_time: BIGINT - End timestamp (nanoseconds)
+        - status_code: STRING - Span status ('OK' or 'ERROR')
+        - status_message: STRING - Error details if status is ERROR
+        - attributes: MAP<STRING, STRING> - Span metadata
+        - events: ARRAY<STRUCT> - Span events with name, timestamp, attributes
+
+    - assessments: ARRAY<STRUCT>
+        Each assessment contains:
+        - assessment_id: STRING - Assessment identifier
+        - name: STRING - Assessment name
+        - source: STRUCT - Source type (HUMAN/LLM_JUDGE/CODE) and source_id
+        - feedback: STRUCT - Feedback value and error info
+        - expectation: STRUCT - Expected value/ground truth
+        - rationale: STRING - Explanation for assessment
+        - metadata: MAP<STRING, STRING> - Additional context
+        - span_id: STRING - Optional related span ID
+
+    KEY SQL SYNTAX PATTERNS FOR NESTED DATA:
+
+    Example: Analyzing Span Errors
+    -------------------------------
+    -- Access MAP fields using bracket notation:
+    SELECT
+        trace_id,
+        trace_metadata['mlflow.traceOutputs'] as output,
+        tags['mlflow.traceName'] as trace_name
+    FROM {table_name}
+    WHERE trace_metadata['mlflow.traceInputs'] LIKE '%error%'
+    LIMIT 10
+
+    -- Work with ARRAY fields using LATERAL VIEW explode:
+    SELECT
+        s.name as span_name,
+        s.status_code,  -- Values are 'OK' or 'ERROR' (not 'STATUS_CODE_OK')
+        COUNT(*) as error_count
+    FROM {table_name} t
+    LATERAL VIEW explode(spans) AS s
+    WHERE s.status_code = 'ERROR'
+    GROUP BY s.name, s.status_code
+
+    -- Filter arrays inline using filter() and size():
+    SELECT
+        trace_id,
+        size(filter(spans, s -> s.status_code = 'ERROR')) as error_span_count,
+        size(filter(spans, s -> s.name = 'extract_action_items' AND s.status_code = 'ERROR')) as action_item_errors
+    FROM {table_name}
+    WHERE size(filter(spans, s -> s.status_code = 'ERROR')) > 0
+    LIMIT 10
+
+    Quality metric example queries:
+        Verbosity Analysis: 
+        -------------------
+        WITH percentile_thresholds AS (
+          SELECT
+            percentile(LENGTH(request), 0.25) as short_input_threshold,
+            percentile(LENGTH(response), 0.90) as verbose_response_threshold
+          FROM {table_name}
+          WHERE state = 'OK'
+        ),
+        shorter_inputs AS (
+          SELECT
+            t.trace_id,
+            LENGTH(t.response) as response_length
+          FROM {table_name} t
+          CROSS JOIN percentile_thresholds p
+          WHERE t.state = 'OK'
+            AND LENGTH(t.request) <= p.short_input_threshold
+        ),
+        verbose_traces AS (
+          SELECT
+            trace_id,
+            response_length > (SELECT verbose_response_threshold FROM percentile_thresholds) as is_verbose
+          FROM shorter_inputs
+        )
+        SELECT
+          ROUND(100.0 * SUM(CASE WHEN is_verbose THEN 1 ELSE 0 END) / COUNT(*), 2) as verbose_pct,
+        FROM verbose_traces
+
+        Response Quality Issues
+        ----------------------------
+        WITH quality_issues AS (
+          SELECT
+            trace_id,
+            (response LIKE '%?%' OR
+             LOWER(response) LIKE '%apologize%' OR LOWER(response) LIKE '%sorry%' OR
+             LOWER(response) LIKE '%not sure%' OR LOWER(response) LIKE '%cannot confirm%') as has_quality_issue
+          FROM {table_name}
+          WHERE state = 'OK'
+        )
+        SELECT
+          ROUND(100.0 * SUM(CASE WHEN has_quality_issue THEN 1 ELSE 0 END) / COUNT(*), 2) as problematic_response_rate,
+        FROM quality_issues
+
+        Rushed Processing
+        ----------------------------
+        WITH percentile_thresholds AS (
+          SELECT
+            percentile(LENGTH(request), 0.75) as complex_threshold,
+            percentile(execution_duration_ms, 0.10) as fast_threshold
+          FROM {table_name}
+          WHERE state = 'OK' AND execution_duration_ms > 0
+        ),
+        complex_requests AS (
+          SELECT
+            t.trace_id,
+            LENGTH(t.request) > p.complex_threshold as is_complex,
+            t.execution_duration_ms < p.fast_threshold as is_fast
+          FROM {table_name} t
+          CROSS JOIN percentile_thresholds p
+          WHERE t.state = 'OK' AND t.execution_duration_ms > 0
+        )
+        SELECT
+          ROUND(100.0 * SUM(CASE WHEN is_complex AND is_fast THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN is_complex THEN 1 ELSE 0 END), 0), 2) as rushed_complex_pct,
+        FROM complex_requests
+
+        Empty/Minimal Responses
+        ----------------------------
+        WITH minimal_check AS (
+          SELECT
+            trace_id,
+            LENGTH(response) < 50 as is_minimal
+          FROM {table_name}
+          WHERE state = 'OK'
+        )
+        SELECT
+          ROUND(100.0 * SUM(CASE WHEN is_minimal THEN 1 ELSE 0 END) / COUNT(*), 2) as minimal_response_rate,
+        FROM minimal_check
+    
+    """
+    from mlflow.store.tracking.insights_databricks_sql_store import InsightsDatabricksSqlStore
+
+    try:
+        # Initialize the store
+        store = InsightsDatabricksSqlStore("databricks")
+
+        # Execute the SQL query
+        results = store.execute_sql(sql)
+
+        # Log the successful query to YAML artifact
+        from mlflow.insights.utils import save_sql_queries_to_yaml
+        save_sql_queries_to_yaml(run_id, sql)
+
+        if output == "json":
+            # JSON output
+            click.echo(json.dumps(results, indent=2))
+        else:
+            # Table output
+            if not results:
+                click.echo("No results returned.")
+                return
+
+            # Extract headers from first row
+            headers = list(results[0].keys())
+
+            # Convert results to table format
+            table_data = []
+            for row in results:
+                table_data.append([str(row.get(header, "")) for header in headers])
+
+            # Display as table
+            click.echo(_create_table(table_data, headers=headers))
+
+    except Exception as e:
+        click.echo(f"Error executing SQL query: {e}", err=True)
+        raise click.Abort()

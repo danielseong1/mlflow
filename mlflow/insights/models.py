@@ -44,6 +44,119 @@ class IssueStatus(str, Enum):
     REJECTED = "REJECTED"
 
 
+class BaselineCensusMetadata(BaseModel):
+    """Metadata section of the baseline census."""
+
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp")
+    table_name: Optional[str] = Field(description="Source table name for the census")
+    additional_metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata about the census"
+    )
+
+
+class BaselineCensusOperationalMetrics(BaseModel):
+    """Operational metrics section of the baseline census."""
+
+    # Basic counts and error rates
+    total_traces: int = Field(description="Total number of traces analyzed")
+    ok_count: int = Field(description="Number of traces with OK status")
+    error_count: int = Field(description="Number of traces with ERROR status")
+    error_rate: float = Field(description="Error rate as percentage")
+    error_sample_trace_ids: list[str] = Field(
+        default_factory=list, description="Sample trace IDs of errors (up to 3)"
+    )
+
+    # Latency metrics
+    p50_latency_ms: Optional[float] = Field(description="50th percentile latency in milliseconds")
+    p90_latency_ms: Optional[float] = Field(description="90th percentile latency in milliseconds")
+    p95_latency_ms: Optional[float] = Field(description="95th percentile latency in milliseconds")
+    p99_latency_ms: Optional[float] = Field(description="99th percentile latency in milliseconds")
+    max_latency_ms: Optional[float] = Field(description="Maximum latency in milliseconds")
+
+    # Time range of analyzed traces
+    first_trace_timestamp: Optional[str] = Field(description="Timestamp of the earliest trace")
+    last_trace_timestamp: Optional[str] = Field(description="Timestamp of the latest trace")
+
+    # Error spans
+    top_error_spans: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Top error spans with count, percentage, and sample trace IDs",
+    )
+
+    # Slow tools/spans
+    top_slow_tools: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Top slow tools/spans with latency metrics and sample trace IDs",
+    )
+
+    # Time buckets
+    time_buckets: list[dict[str, Any]] = Field(
+        default_factory=list, description="Time-based performance buckets"
+    )
+
+
+class BaselineCensusQualityMetrics(BaseModel):
+    """Quality metrics section of the baseline census."""
+
+    # Verbosity metric
+    verbosity: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "description": "Percentage of short inputs (<=P25 request length) that receive verbose responses (>P90 response length)"
+        },
+        description="Verbosity analysis - detecting verbose responses to short inputs with sample trace IDs",
+    )
+
+    # Response quality issues (combined uncertainty metric)
+    response_quality_issues: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "description": "Percentage of responses containing question marks, apologies ('sorry', 'apologize'), or uncertainty phrases ('not sure', 'cannot confirm')"
+        },
+        description="Combined analysis of responses with questions and uncertainty indicators with sample trace IDs",
+    )
+
+    # Rushed processing metric
+    rushed_processing: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "description": "Percentage of complex requests (>P75 length) processed faster than typical fast responses (P10 execution time)"
+        },
+        description="Analysis of response time vs request complexity with sample trace IDs",
+    )
+
+    # Minimal responses metric
+    minimal_responses: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "description": "Percentage of responses shorter than 50 characters, potentially indicating incomplete or minimal responses"
+        },
+        description="Analysis of minimal or empty responses with sample trace IDs",
+    )
+
+
+class BaselineCensus(BaseModel):
+    """
+    Baseline census model representing system performance metrics.
+    Stored as baseline_census.yaml in the insights/ artifact directory.
+
+    The census is organized into three main sections that are preserved in JSON:
+    - metadata: Information about the census and data source
+    - operational_metrics: System performance, errors, and latency
+    - quality_metrics: Agent response quality analysis
+    """
+
+    metadata: BaselineCensusMetadata = Field(
+        default_factory=BaselineCensusMetadata,
+        description="Metadata about the census and data source",
+    )
+
+    operational_metrics: BaselineCensusOperationalMetrics = Field(
+        default_factory=BaselineCensusOperationalMetrics,
+        description="System performance, errors, and latency metrics",
+    )
+
+    quality_metrics: BaselineCensusQualityMetrics = Field(
+        default_factory=BaselineCensusQualityMetrics, description="Agent response quality analysis"
+    )
+
+
 class Analysis(BaseModel):
     """
     Analysis model representing a high-level investigation.
@@ -81,6 +194,13 @@ class EvidenceEntry(BaseModel):
     )
 
 
+class SqlQueryEntry(BaseModel):
+    """SQL query entry for hypotheses."""
+
+    id: str = Field(description="Unique identifier for the SQL query")
+    query: str = Field(description="The SQL query text")
+
+
 class Hypothesis(BaseModel):
     """
     Hypothesis model representing a testable statement or theory.
@@ -92,6 +212,7 @@ class Hypothesis(BaseModel):
         description="UUID unique within the run",
     )
     statement: str = Field(description="The hypothesis being tested")
+    rationale: str = Field(description="Detailed rationale for the hypothesis")
     testing_plan: str = Field(
         description="Detailed plan for how to test this hypothesis including validation/refutation criteria"
     )
@@ -261,18 +382,17 @@ class AnalysisSummary(BaseModel):
     hypothesis_count: Optional[int] = 0
     validated_count: Optional[int] = 0
     hypotheses: Optional[list["HypothesisSummary"]] = Field(
-        default_factory=list,
-        description="List of hypothesis summaries for this analysis"
+        default_factory=list, description="List of hypothesis summaries for this analysis"
     )
 
     @classmethod
     def from_analysis(
-        cls, 
-        run_id: str, 
-        analysis: Analysis, 
+        cls,
+        run_id: str,
+        analysis: Analysis,
         hypothesis_count: int = 0,
         validated_count: int = 0,
-        hypotheses: Optional[list["HypothesisSummary"]] = None
+        hypotheses: Optional[list["HypothesisSummary"]] = None,
     ) -> "AnalysisSummary":
         """Create a summary from a full analysis."""
         return cls(
@@ -293,6 +413,7 @@ class HypothesisSummary(BaseModel):
 
     hypothesis_id: str
     statement: str
+    rationale: str
     testing_plan: Optional[str] = None  # Include testing plan in summary
     status: HypothesisStatus
     trace_count: int
@@ -308,6 +429,7 @@ class HypothesisSummary(BaseModel):
         return cls(
             hypothesis_id=hypothesis.hypothesis_id,
             statement=hypothesis.statement,
+            rationale=hypothesis.rationale,
             testing_plan=hypothesis.testing_plan,  # Include testing plan
             status=hypothesis.status,
             trace_count=hypothesis.trace_count,

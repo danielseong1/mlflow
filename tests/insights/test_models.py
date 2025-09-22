@@ -76,14 +76,15 @@ class TestHypothesisModel:
     """Test Hypothesis model."""
 
     def test_hypothesis_requires_testing_plan(self):
-        """Test that hypothesis requires testing_plan field."""
-        # Should fail without testing_plan
-        with pytest.raises(TypeError):
+        """Test that hypothesis requires testing_plan and rationale fields."""
+        # Should fail without testing_plan and rationale
+        with pytest.raises(Exception):  # Pydantic raises ValidationError
             Hypothesis(statement="Test statement")
         
-        # Should succeed with testing_plan
+        # Should succeed with testing_plan and rationale
         hypothesis = Hypothesis(
             statement="Test statement",
+            rationale="Detailed rationale for the hypothesis",
             testing_plan="Detailed testing plan",
         )
         assert hypothesis.testing_plan == "Detailed testing plan"
@@ -105,6 +106,7 @@ class TestHypothesisModel:
         
         hypothesis = Hypothesis(
             statement="DB locks cause timeouts",
+            rationale="Investigating database lock issues",
             testing_plan="Test plan",
             evidence=evidence,
         )
@@ -123,6 +125,7 @@ class TestHypothesisModel:
         
         hypothesis = Hypothesis(
             statement="Test",
+            rationale="Test rationale",
             testing_plan="Test plan",
             evidence=evidence_dicts,
         )
@@ -134,6 +137,7 @@ class TestHypothesisModel:
         """Test adding evidence to hypothesis."""
         hypothesis = Hypothesis(
             statement="Test",
+            rationale="Test rationale",
             testing_plan="Test plan",
         )
         
@@ -151,6 +155,7 @@ class TestHypothesisModel:
         hypothesis = Hypothesis(
             hypothesis_id="hyp-123",
             statement="Test statement",
+            rationale="Test rationale",
             testing_plan="Test plan",
             status=HypothesisStatus.VALIDATED,
         )
@@ -311,6 +316,7 @@ class TestYAMLSerialization:
         """Test hypothesis can be saved and loaded from YAML."""
         hypothesis = Hypothesis(
             statement="Test hypothesis",
+            rationale="Test rationale for hypothesis",
             testing_plan="Detailed testing plan with validation criteria",
             evidence=[
                 {"trace_id": "tr-001", "rationale": "Evidence 1", "supports": True},

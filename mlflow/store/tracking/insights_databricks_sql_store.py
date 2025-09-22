@@ -862,12 +862,62 @@ class InsightsDatabricksSqlStore(InsightsAbstractStore, DatabricksSqlStore):
         """Get correlations - TODO: Implement using Databricks SQL."""
         return []
     
+    def execute_sql(self, sql_query: str) -> List[Dict[str, Any]]:
+        """Execute a raw SQL query against the Databricks warehouse.
+
+        Args:
+            sql_query: The SQL query string to execute
+
+        Returns:
+            List of dictionaries representing the query results
+        """
+        try:
+            import datetime
+            from decimal import Decimal
+            from pyspark.sql.types import Row
+
+            spark = self._get_or_create_spark_session()
+            result = spark.sql(sql_query).collect()
+
+            def convert_value(value):
+                """Recursively convert Spark SQL types to JSON-serializable types."""
+                if value is None:
+                    return None
+                elif isinstance(value, (datetime.datetime, datetime.date)):
+                    return value.isoformat()
+                elif isinstance(value, Decimal):
+                    return float(value)
+                elif isinstance(value, Row):
+                    # Convert nested Row objects to dicts
+                    return {k: convert_value(v) for k, v in value.asDict().items()}
+                elif isinstance(value, dict):
+                    # Handle maps
+                    return {k: convert_value(v) for k, v in value.items()}
+                elif isinstance(value, (list, tuple)):
+                    # Handle arrays
+                    return [convert_value(item) for item in value]
+                else:
+                    return value
+
+            # Convert Spark Row objects to dictionaries with proper type handling
+            rows = []
+            for row in result:
+                row_dict = {}
+                for key, value in row.asDict().items():
+                    row_dict[key] = convert_value(value)
+                rows.append(row_dict)
+
+            return rows
+        except Exception as e:
+            _logger.error(f"Error executing SQL query: {e}")
+            raise MlflowException(f"Failed to execute SQL query: {str(e)}")
+
     def get_assessments(self, experiment_id: str) -> List[Dict[str, Any]]:
         """Get assessments for an experiment.
-        
+
         Args:
             experiment_id: The experiment ID to get assessments for
-            
+
         Returns:
             List of assessment info dictionaries
         """
