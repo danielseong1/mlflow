@@ -282,7 +282,7 @@ class InsightsClient:
             (SELECT COUNT(*) FROM {table_name}) as total_traces,
             (SELECT SUM(CASE WHEN state = 'OK' THEN 1 ELSE 0 END) FROM {table_name}) as ok_count,
             (SELECT SUM(CASE WHEN state = 'ERROR' THEN 1 ELSE 0 END) FROM {table_name}) as error_count,
-            (SELECT ROUND(SUM(CASE WHEN state = 'ERROR' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) FROM {table_name}) as error_rate,
+            (SELECT ROUND(SUM(CASE WHEN state = 'ERROR' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) FROM {table_name}) as error_rate_percentage,
             collect_list(CASE WHEN rn <= 3 THEN trace_id END) as error_sample_trace_ids
         FROM error_traces
         """
@@ -311,7 +311,7 @@ class InsightsClient:
                     FROM {table_name}
                     LATERAL VIEW explode(spans) AS s
                     WHERE s.status_code = 'ERROR'
-                ), 2) as pct_of_errors,
+                ), 2) as percentage_of_errors,
                 ROW_NUMBER() OVER (PARTITION BY span.name ORDER BY t.trace_id) as rn
             FROM {table_name} t
             LATERAL VIEW explode(spans) AS span
@@ -321,15 +321,15 @@ class InsightsClient:
             SELECT
                 error_span_name,
                 count,
-                pct_of_errors,
+                percentage_of_errors,
                 collect_list(CASE WHEN rn <= 3 THEN trace_id END) as sample_trace_ids
             FROM error_spans_with_traces
-            GROUP BY error_span_name, count, pct_of_errors
+            GROUP BY error_span_name, count, percentage_of_errors
         )
         SELECT
             error_span_name,
             count,
-            pct_of_errors,
+            percentage_of_errors,
             sample_trace_ids
         FROM error_spans_summary
         ORDER BY count DESC
@@ -373,18 +373,40 @@ class InsightsClient:
         LIMIT 15
         """
 
-        # 5. Time buckets
+        # 5. Time buckets (max 10 buckets with adaptive intervals)
         time_buckets_query = f"""
+        WITH time_range AS (
+            SELECT
+                MIN(request_time) as min_time,
+                MAX(request_time) as max_time,
+                CAST((UNIX_TIMESTAMP(MAX(request_time)) - UNIX_TIMESTAMP(MIN(request_time))) / 10 AS BIGINT) as bucket_width_seconds
+            FROM {table_name}
+        ),
+        bucketed_data AS (
+            SELECT
+                -- Create bucket number (0-9) based on time position
+                LEAST(9, FLOOR((UNIX_TIMESTAMP(t.request_time) - UNIX_TIMESTAMP(r.min_time)) / GREATEST(1, r.bucket_width_seconds))) as bucket_num,
+                -- Calculate bucket start time
+                FROM_UNIXTIME(
+                    UNIX_TIMESTAMP(r.min_time) +
+                    (LEAST(9, FLOOR((UNIX_TIMESTAMP(t.request_time) - UNIX_TIMESTAMP(r.min_time)) / GREATEST(1, r.bucket_width_seconds))) * r.bucket_width_seconds)
+                ) as time_bucket,
+                t.state,
+                t.execution_duration_ms
+            FROM {table_name} t
+            CROSS JOIN time_range r
+            WHERE t.request_time IS NOT NULL
+        )
         SELECT
-            date_trunc('hour', request_time) as time_bucket,
+            time_bucket,
             COUNT(*) as total_traces,
             SUM(CASE WHEN state = 'OK' THEN 1 ELSE 0 END) as ok_count,
             SUM(CASE WHEN state = 'ERROR' THEN 1 ELSE 0 END) as error_count,
-            ROUND(SUM(CASE WHEN state = 'ERROR' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as error_rate,
+            ROUND(SUM(CASE WHEN state = 'ERROR' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as error_rate_percentage,
             percentile(execution_duration_ms, 0.95) as p95_latency_ms
-        FROM {table_name}
-        GROUP BY 1
-        ORDER BY 1
+        FROM bucketed_data
+        GROUP BY time_bucket
+        ORDER BY time_bucket
         """
 
         # 6. Timestamp range
@@ -427,7 +449,7 @@ class InsightsClient:
           FROM verbose_traces
         )
         SELECT
-          ROUND(100.0 * SUM(CASE WHEN is_verbose THEN 1 ELSE 0 END) / COUNT(*), 2) as verbose_pct,
+          ROUND(100.0 * SUM(CASE WHEN is_verbose THEN 1 ELSE 0 END) / COUNT(*), 2) as verbose_percentage,
           collect_list(CASE WHEN is_verbose AND rn <= 3 THEN trace_id END) as sample_trace_ids
         FROM limited_samples
         """
@@ -451,7 +473,7 @@ class InsightsClient:
           FROM quality_issues
         )
         SELECT
-          ROUND(100.0 * SUM(CASE WHEN has_quality_issue THEN 1 ELSE 0 END) / COUNT(*), 2) as problematic_response_rate,
+          ROUND(100.0 * SUM(CASE WHEN has_quality_issue THEN 1 ELSE 0 END) / COUNT(*), 2) as problematic_response_rate_percentage,
           collect_list(CASE WHEN has_quality_issue AND rn <= 3 THEN trace_id END) as sample_trace_ids
         FROM limited_samples
         """
@@ -540,7 +562,7 @@ class InsightsClient:
             total_traces=basic.get("total_traces", 0),
             ok_count=basic.get("ok_count", 0),
             error_count=basic.get("error_count", 0),
-            error_rate=basic.get("error_rate", 0.0),
+            error_rate_percentage=basic.get("error_rate_percentage", 0.0),
             error_sample_trace_ids=basic.get("error_sample_trace_ids", [])[
                 :3
             ],  # Sample error traces
@@ -559,12 +581,12 @@ class InsightsClient:
         quality_metrics_section = BaselineCensusQualityMetrics(
             verbosity={
                 "description": "Percentage of short inputs (<=P25 request length) that receive verbose responses (>P90 response length)",
-                "value": verbosity.get("verbose_pct", 0.0),
+                "value": verbosity.get("verbose_percentage", 0.0),
                 "sample_trace_ids": verbosity.get("sample_trace_ids", [])[:3],  # Limit to 3
             },
             response_quality_issues={
                 "description": "Percentage of responses containing question marks, apologies ('sorry', 'apologize'), or uncertainty phrases ('not sure', 'cannot confirm')",
-                "value": response_quality_issues.get("problematic_response_rate", 0.0),
+                "value": response_quality_issues.get("problematic_response_rate_percentage", 0.0),
                 "sample_trace_ids": response_quality_issues.get("sample_trace_ids", [])[
                     :3
                 ],  # Limit to 3

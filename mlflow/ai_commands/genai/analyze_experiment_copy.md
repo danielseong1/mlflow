@@ -113,9 +113,6 @@ Use `mlflow traces execute-sql` when:
   - Traces exist in the experiment
   - CLI is working properly (using local MLflow installation)
   - Database connection is valid
-- Extract sample trace IDs for testing
-- Get one full trace by trace_id that has state OK to understand the data structure (errors might not have the structure)
-  - Use: `uv run --env-file <env_file_path> python -m mlflow traces get --trace-id <id>`
 
 ## Step 2: Analysis Phase
 
@@ -150,6 +147,7 @@ Use `mlflow traces execute-sql` when:
 - Analyze ~20 trace inputs/outputs to understand the agent's task:
   - Extract trace inputs/outputs: `--extract-fields info.trace_metadata.\`mlflow.traceInputs\`,info.trace_metadata.\`mlflow.traceOutputs\``
   - **LINK these traces** if you get specific trace IDs
+  - Use: `uv run --env-file <env_file_path> python -m mlflow traces get --trace-id <id>` to examine traces in detail
   - Examine these fields to understand:
     - Types of questions users ask
     - Types of responses the agent provides
@@ -161,7 +159,7 @@ Use `mlflow traces execute-sql` when:
 - Generate a 1-paragraph agent description covering:
   - **What the agent's job is** (e.g., "a boating agent that answers questions about weather and helps users plan trips")
   - **What data sources it has access to** (APIs, databases, etc.)
-- **Present this description to the user** and ask for confirmation/corrections
+    **Present this description to the user** and ask for confirmation/corrections
 - **WAIT for user response** - do not proceed until they confirm or provide corrections
 - **Ask if they want to focus the analysis on anything specific** (or do a general report)
   - Their specific concerns should become initial hypotheses
@@ -214,17 +212,25 @@ uv run --env-file .env python -m mlflow insights get-baseline-census \
   --run-id <analysis_run_id>
 ```
 
-**IMPORTANT**: Perform additional investigation if needed using `mlflow traces search` and `mlflow traces execute-sql` tools. Try to find issues that affect many traces, not drill down into one specific issue.
-
 ### 2.2 Document Known Issues from Census
 
 After reviewing the census data, document any issues that are already validated facts. These are observable problems from the census that do not need further testing.
 
-**Examples of known issues from census:**
+**IMPORTANT: Only create issues for OPERATIONAL METRICS from census, NOT quality metrics:**
 
-- High error rates for specific spans (e.g., "30% of traces have tool_X failures")
-- Missing required outputs (e.g., "15% of traces return empty results")
-- Performance problems (e.g., "25% of traces exceed 30s duration")
+**Valid issues from census (operational facts):**
+
+- High trace error rate (e.g., "X% of traces have ERROR status")
+- Specific span failures (e.g., "X spans fail in Y% of error cases")
+- Extreme latency outliers (e.g., "Max latency reaches X+ minutes")
+- Consistent tool/API errors (e.g., "X API fails 30% of the time")
+
+**NOT valid issues from census (require hypothesis testing):**
+
+- Quality metrics like verbosity percentages (proxy metric - needs manual validation)
+- Response quality issues (requires examining actual content)
+- Rushed processing metrics (needs investigation of actual processing quality)
+- Minimal response rates (needs content analysis)
 
 Create the issues:
 
@@ -239,9 +245,11 @@ uv run --env-file .env python -m mlflow insights create-issue \
   --evidence '{"trace_id": "another tr-sample-from-census", "rationale": ""}'
 ```
 
+**IMPORTANT**: Summarize to the user the issues you created.
+
 ### 2.3 Generate Hypotheses for Investigation
 
-Based on your preliminary investigation, generate hypotheses about potential issues that need testing. These are suspected problems that require validation.
+Based on the census and sample traces you've examined, generate hypotheses about potential issues that need testing. These are suspected problems that require validation.
 
 #### Testing Plan Requirements
 
@@ -284,7 +292,17 @@ Testing Plan:
 
 ```
 
-**IMPORTANT**: Present all proposed hypotheses to the user BEFORE creating them:
+Create the hypotheses:
+
+```bash
+uv run --env-file .env python -m mlflow insights create-hypothesis \
+  --run-id <analysis_run_id> \
+  --statement "<Hypothesis about potential issue>" \
+  --rationale "<Why this needs investigation and potential impact>" \
+  --testing-plan "<Step 1: Specific query or analysis> <Step 2: What to examine> <Step 3: How to validate/reject>"
+```
+
+**IMPORTANT**: Summarize created hypotheses to the user:
 
 ```
 ## Proposed Hypotheses for Investigation
@@ -295,22 +313,6 @@ Testing Plan:
       - Step 1: [Specific query or analysis]
       - Step 2: [What to examine]
       - Step 3: [How to validate/reject]
-Would you like to:
-- Add additional hypotheses?
-- Remove any hypotheses?
-- Proceed with creating these?
-```
-
-**WAIT for user confirmation before creating any hypotheses.**
-
-After user approval, create the hypotheses:
-
-```bash
-uv run --env-file .env python -m mlflow insights create-hypothesis \
-  --run-id <analysis_run_id> \
-  --statement "<Hypothesis about potential issue>" \
-  --rationale "<Why this needs investigation and potential impact>" \
-  --testing-plan "<Step 1: Specific query or analysis> <Step 2: What to examine> <Step 3: How to validate/reject>"
 ```
 
 ### 2.4 Test Hypotheses

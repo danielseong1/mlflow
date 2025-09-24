@@ -61,7 +61,7 @@ class BaselineCensusOperationalMetrics(BaseModel):
     total_traces: int = Field(description="Total number of traces analyzed")
     ok_count: int = Field(description="Number of traces with OK status")
     error_count: int = Field(description="Number of traces with ERROR status")
-    error_rate: float = Field(description="Error rate as percentage")
+    error_rate_percentage: float = Field(description="Error rate as percentage")
     error_sample_trace_ids: list[str] = Field(
         default_factory=list, description="Sample trace IDs of errors (up to 3)"
     )

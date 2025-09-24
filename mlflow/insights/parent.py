@@ -25,6 +25,17 @@ def get_or_create_parent_run(client: MlflowClient, experiment_id: str) -> str:
     Returns:
         Run ID of the parent insights run
     """
+
+    # Daniel Insights baseline
+    # return "7c4a9013e6264703862a91de4fe13197"
+
+    # Daniel Insights
+    # return "2b8c2e0b9e08404ab0fdfa653112ee88"
+
+    # Daniel Insights codex
+    # return "a523df8148b04ef1a23bdee95468930e"
+
+
     # Search for existing parent run
     runs = client.search_runs(
         experiment_ids=[experiment_id],

@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -2146,7 +2146,7 @@ requires-dist = [
     { name = "click", specifier = ">=7.0,<9" },
     { name = "cloudpickle", specifier = "<4" },
     { name = "databricks-agents", marker = "extra == 'databricks'", specifier = ">=1.2.0,<2.0" },
-    { name = "databricks-connect", specifier = "==17.1" },
+    { name = "databricks-connect", specifier = "==17.1.0" },
     { name = "databricks-sdk", specifier = ">=0.20.0,<1" },
     { name = "docker", specifier = ">=4.0.0,<8" },
     { name = "fastapi", specifier = "<1" },
