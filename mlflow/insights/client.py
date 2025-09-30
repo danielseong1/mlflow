@@ -70,7 +70,9 @@ class InsightsClient:
             Run ID of the created analysis run
         """
         # Create nested run under parent
-        run_id = create_nested_analysis_run(self._mlflow_client, experiment_id, run_name)
+        run_id = create_nested_analysis_run(
+            self._mlflow_client, experiment_id, run_name
+        )
 
         try:
             # Create analysis metadata
@@ -121,7 +123,9 @@ class InsightsClient:
                 if not isinstance(ev, dict):
                     raise ValueError(f"Evidence must be a dict, got {type(ev)}")
                 if "trace_id" not in ev or "rationale" not in ev:
-                    raise ValueError("Evidence must have 'trace_id' and 'rationale' fields")
+                    raise ValueError(
+                        "Evidence must have 'trace_id' and 'rationale' fields"
+                    )
                 # Default supports to True if not specified
                 supports = ev.get("supports", True)
                 evidence_entries.append(
@@ -201,7 +205,9 @@ class InsightsClient:
                 if not isinstance(ev, dict):
                     raise ValueError(f"Evidence must be a dict, got {type(ev)}")
                 if "trace_id" not in ev or "rationale" not in ev:
-                    raise ValueError("Evidence must have 'trace_id' and 'rationale' fields")
+                    raise ValueError(
+                        "Evidence must have 'trace_id' and 'rationale' fields"
+                    )
                 evidence_entries.append(
                     EvidenceEntry(
                         trace_id=ev["trace_id"],
@@ -262,7 +268,9 @@ class InsightsClient:
             BaselineCensusOperationalMetrics,
             BaselineCensusQualityMetrics,
         )
-        from mlflow.store.tracking.insights_databricks_sql_store import InsightsDatabricksSqlStore
+        from mlflow.store.tracking.insights_databricks_sql_store import (
+            InsightsDatabricksSqlStore,
+        )
 
         # Initialize the SQL store
         store = InsightsDatabricksSqlStore("databricks")
@@ -283,7 +291,7 @@ class InsightsClient:
             (SELECT SUM(CASE WHEN state = 'OK' THEN 1 ELSE 0 END) FROM {table_name}) as ok_count,
             (SELECT SUM(CASE WHEN state = 'ERROR' THEN 1 ELSE 0 END) FROM {table_name}) as error_count,
             (SELECT ROUND(SUM(CASE WHEN state = 'ERROR' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) FROM {table_name}) as error_rate_percentage,
-            collect_list(CASE WHEN rn <= 3 THEN trace_id END) as error_sample_trace_ids
+            collect_list(CASE WHEN rn <= 15 THEN trace_id END) as error_sample_trace_ids
         FROM error_traces
         """
 
@@ -322,7 +330,7 @@ class InsightsClient:
                 error_span_name,
                 count,
                 percentage_of_errors,
-                collect_list(CASE WHEN rn <= 3 THEN trace_id END) as sample_trace_ids
+                collect_list(CASE WHEN rn <= 15 THEN trace_id END) as sample_trace_ids
             FROM error_spans_with_traces
             GROUP BY error_span_name, count, percentage_of_errors
         )
@@ -333,7 +341,7 @@ class InsightsClient:
             sample_trace_ids
         FROM error_spans_summary
         ORDER BY count DESC
-        LIMIT 10
+        LIMIT 5
         """
 
         # 4. Top slow tools with sample trace IDs
@@ -357,7 +365,7 @@ class InsightsClient:
                 count,
                 p95_latency_ms,
                 median_latency_ms,
-                collect_list(CASE WHEN rn <= 3 THEN trace_id END) as sample_trace_ids
+                collect_list(CASE WHEN rn <= 15 THEN trace_id END) as sample_trace_ids
             FROM slow_tools_with_traces
             GROUP BY tool_span_name, count, p95_latency_ms, median_latency_ms
             HAVING count >= 10
@@ -370,7 +378,7 @@ class InsightsClient:
             sample_trace_ids
         FROM slow_tools_summary
         ORDER BY p95_latency_ms DESC
-        LIMIT 15
+        LIMIT 5
         """
 
         # 5. Time buckets (max 10 buckets with adaptive intervals)
@@ -450,7 +458,7 @@ class InsightsClient:
         )
         SELECT
           ROUND(100.0 * SUM(CASE WHEN is_verbose THEN 1 ELSE 0 END) / COUNT(*), 2) as verbose_percentage,
-          collect_list(CASE WHEN is_verbose AND rn <= 3 THEN trace_id END) as sample_trace_ids
+          collect_list(CASE WHEN is_verbose AND rn <= 15 THEN trace_id END) as sample_trace_ids
         FROM limited_samples
         """
 
@@ -474,7 +482,7 @@ class InsightsClient:
         )
         SELECT
           ROUND(100.0 * SUM(CASE WHEN has_quality_issue THEN 1 ELSE 0 END) / COUNT(*), 2) as problematic_response_rate_percentage,
-          collect_list(CASE WHEN has_quality_issue AND rn <= 3 THEN trace_id END) as sample_trace_ids
+          collect_list(CASE WHEN has_quality_issue AND rn <= 15 THEN trace_id END) as sample_trace_ids
         FROM limited_samples
         """
 
@@ -506,7 +514,7 @@ class InsightsClient:
         )
         SELECT
           ROUND(100.0 * SUM(CASE WHEN is_complex AND is_fast THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN is_complex THEN 1 ELSE 0 END), 0), 2) as rushed_complex_pct,
-          collect_list(CASE WHEN is_complex AND is_fast AND rn <= 3 THEN trace_id END) as sample_trace_ids
+          collect_list(CASE WHEN is_complex AND is_fast AND rn <= 15 THEN trace_id END) as sample_trace_ids
         FROM limited_samples
         """
 
@@ -528,7 +536,7 @@ class InsightsClient:
         )
         SELECT
           ROUND(100.0 * SUM(CASE WHEN is_minimal THEN 1 ELSE 0 END) / COUNT(*), 2) as minimal_response_rate,
-          collect_list(CASE WHEN is_minimal AND rn <= 3 THEN trace_id END) as sample_trace_ids
+          collect_list(CASE WHEN is_minimal AND rn <= 15 THEN trace_id END) as sample_trace_ids
         FROM limited_samples
         """
 
@@ -540,7 +548,9 @@ class InsightsClient:
         time_buckets_results = store.execute_sql(time_buckets_query)
         timestamp_results = store.execute_sql(timestamp_query)
         verbosity_results = store.execute_sql(verbosity_query)
-        response_quality_issues_results = store.execute_sql(response_quality_issues_query)
+        response_quality_issues_results = store.execute_sql(
+            response_quality_issues_query
+        )
         rushed_processing_results = store.execute_sql(rushed_processing_query)
         minimal_responses_results = store.execute_sql(minimal_responses_query)
 
@@ -550,13 +560,21 @@ class InsightsClient:
         timestamps = timestamp_results[0] if timestamp_results else {}
         verbosity = verbosity_results[0] if verbosity_results else {}
         response_quality_issues = (
-            response_quality_issues_results[0] if response_quality_issues_results else {}
+            response_quality_issues_results[0]
+            if response_quality_issues_results
+            else {}
         )
-        rushed_processing = rushed_processing_results[0] if rushed_processing_results else {}
-        minimal_responses = minimal_responses_results[0] if minimal_responses_results else {}
+        rushed_processing = (
+            rushed_processing_results[0] if rushed_processing_results else {}
+        )
+        minimal_responses = (
+            minimal_responses_results[0] if minimal_responses_results else {}
+        )
 
         # Create nested sections
-        metadata_section = BaselineCensusMetadata(table_name=table_name, additional_metadata={})
+        metadata_section = BaselineCensusMetadata(
+            table_name=table_name, additional_metadata={}
+        )
 
         operational_metrics_section = BaselineCensusOperationalMetrics(
             total_traces=basic.get("total_traces", 0),
@@ -564,7 +582,7 @@ class InsightsClient:
             error_count=basic.get("error_count", 0),
             error_rate_percentage=basic.get("error_rate_percentage", 0.0),
             error_sample_trace_ids=basic.get("error_sample_trace_ids", [])[
-                :3
+                :15
             ],  # Sample error traces
             p50_latency_ms=latency.get("p50_latency_ms"),
             p90_latency_ms=latency.get("p90_latency_ms"),
@@ -582,24 +600,32 @@ class InsightsClient:
             verbosity={
                 "description": "Percentage of short inputs (<=P25 request length) that receive verbose responses (>P90 response length)",
                 "value": verbosity.get("verbose_percentage", 0.0),
-                "sample_trace_ids": verbosity.get("sample_trace_ids", [])[:3],  # Limit to 3
+                "sample_trace_ids": verbosity.get("sample_trace_ids", [])[
+                    :15
+                ],  # Limit to 15
             },
             response_quality_issues={
                 "description": "Percentage of responses containing question marks, apologies ('sorry', 'apologize'), or uncertainty phrases ('not sure', 'cannot confirm')",
-                "value": response_quality_issues.get("problematic_response_rate_percentage", 0.0),
+                "value": response_quality_issues.get(
+                    "problematic_response_rate_percentage", 0.0
+                ),
                 "sample_trace_ids": response_quality_issues.get("sample_trace_ids", [])[
-                    :3
-                ],  # Limit to 3
+                    :15
+                ],  # Limit to 15
             },
             rushed_processing={
                 "description": "Percentage of complex requests (>P75 length) processed faster than typical fast responses (P10 execution time)",
                 "value": rushed_processing.get("rushed_complex_pct", 0.0),
-                "sample_trace_ids": rushed_processing.get("sample_trace_ids", [])[:3],  # Limit to 3
+                "sample_trace_ids": rushed_processing.get("sample_trace_ids", [])[
+                    :15
+                ],  # Limit to 15
             },
             minimal_responses={
                 "description": "Percentage of responses shorter than 50 characters, potentially indicating incomplete or minimal responses",
                 "value": minimal_responses.get("minimal_response_rate", 0.0),
-                "sample_trace_ids": minimal_responses.get("sample_trace_ids", [])[:3],  # Limit to 3
+                "sample_trace_ids": minimal_responses.get("sample_trace_ids", [])[
+                    :15
+                ],  # Limit to 15
             },
         )
 
@@ -612,7 +638,9 @@ class InsightsClient:
 
         # Save census to YAML with organized sections
         filename = "baseline_census.yaml"
-        self._save_census_to_yaml(self._mlflow_client, insights_run_id, filename, census)
+        self._save_census_to_yaml(
+            self._mlflow_client, insights_run_id, filename, census
+        )
 
         return filename
 
@@ -638,13 +666,16 @@ class InsightsClient:
 
         # METADATA SECTION
         yaml_content += "# Information about the census and data source\n"
-        yaml_content += yaml.safe_dump({"metadata": data["metadata"]}, default_flow_style=False)
+        yaml_content += yaml.safe_dump(
+            {"metadata": data["metadata"]}, default_flow_style=False
+        )
         yaml_content += "\n"
 
         # OPERATIONAL METRICS SECTION
         yaml_content += "# System performance, errors, and latency metrics\n"
         yaml_content += yaml.safe_dump(
-            {"operational_metrics": data["operational_metrics"]}, default_flow_style=False
+            {"operational_metrics": data["operational_metrics"]},
+            default_flow_style=False,
         )
         yaml_content += "\n"
 
@@ -732,7 +763,9 @@ class InsightsClient:
         # Get existing hypothesis
         hypothesis = self.get_hypothesis(insights_run_id, hypothesis_id)
         if not hypothesis:
-            raise ValueError(f"Hypothesis {hypothesis_id} not found in run {insights_run_id}")
+            raise ValueError(
+                f"Hypothesis {hypothesis_id} not found in run {insights_run_id}"
+            )
 
         # Update fields
         if status is not None:
@@ -749,7 +782,9 @@ class InsightsClient:
                 if not isinstance(ev, dict):
                     raise ValueError(f"Evidence must be a dict, got {type(ev)}")
                 if "trace_id" not in ev or "rationale" not in ev:
-                    raise ValueError("Evidence must have 'trace_id' and 'rationale' fields")
+                    raise ValueError(
+                        "Evidence must have 'trace_id' and 'rationale' fields"
+                    )
                 supports = ev.get("supports", True)
                 hypothesis.add_evidence(
                     trace_id=ev["trace_id"],
@@ -821,7 +856,9 @@ class InsightsClient:
                 if not isinstance(ev, dict):
                     raise ValueError(f"Evidence must be a dict, got {type(ev)}")
                 if "trace_id" not in ev or "rationale" not in ev:
-                    raise ValueError("Evidence must have 'trace_id' and 'rationale' fields")
+                    raise ValueError(
+                        "Evidence must have 'trace_id' and 'rationale' fields"
+                    )
                 issue.add_evidence(
                     trace_id=ev["trace_id"],
                     rationale=ev["rationale"],
@@ -872,7 +909,11 @@ class InsightsClient:
                 )
 
                 summary = AnalysisSummary.from_analysis(
-                    run.info.run_id, analysis, hypothesis_count, validated_count, hypotheses
+                    run.info.run_id,
+                    analysis,
+                    hypothesis_count,
+                    validated_count,
+                    hypotheses,
                 )
                 summaries.append(summary)
 
@@ -889,11 +930,15 @@ class InsightsClient:
             List of hypothesis summaries
         """
         # Get all hypothesis files
-        hypothesis_files = list_yaml_files(self._mlflow_client, insights_run_id, "hypothesis_")
+        hypothesis_files = list_yaml_files(
+            self._mlflow_client, insights_run_id, "hypothesis_"
+        )
 
         summaries = []
         for filename in hypothesis_files:
-            hypothesis = load_from_yaml(self._mlflow_client, insights_run_id, filename, Hypothesis)
+            hypothesis = load_from_yaml(
+                self._mlflow_client, insights_run_id, filename, Hypothesis
+            )
             if hypothesis:
                 summary = HypothesisSummary.from_hypothesis(hypothesis)
                 summaries.append(summary)
@@ -939,9 +984,13 @@ class InsightsClient:
         Returns:
             Analysis object or None if not found
         """
-        return load_from_yaml(self._mlflow_client, insights_run_id, "analysis.yaml", Analysis)
+        return load_from_yaml(
+            self._mlflow_client, insights_run_id, "analysis.yaml", Analysis
+        )
 
-    def get_hypothesis(self, insights_run_id: str, hypothesis_id: str) -> Optional[Hypothesis]:
+    def get_hypothesis(
+        self, insights_run_id: str, hypothesis_id: str
+    ) -> Optional[Hypothesis]:
         """
         Get detailed hypothesis information.
 
@@ -953,7 +1002,9 @@ class InsightsClient:
             Hypothesis object or None if not found
         """
         filename = f"hypothesis_{hypothesis_id}.yaml"
-        return load_from_yaml(self._mlflow_client, insights_run_id, filename, Hypothesis)
+        return load_from_yaml(
+            self._mlflow_client, insights_run_id, filename, Hypothesis
+        )
 
     def get_issue(self, issue_id: str) -> Optional[Issue]:
         """
@@ -990,7 +1041,9 @@ class InsightsClient:
                 if runs:
                     parent_run_id = runs[0].info.run_id
                     filename = f"issue_{issue_id}.yaml"
-                    issue = load_from_yaml(self._mlflow_client, parent_run_id, filename, Issue)
+                    issue = load_from_yaml(
+                        self._mlflow_client, parent_run_id, filename, Issue
+                    )
                     if issue:
                         return issue
             except Exception:
@@ -1002,7 +1055,9 @@ class InsightsClient:
     # Preview Methods
     # =========================================================================
 
-    def preview_hypotheses(self, insights_run_id: str, max_traces: int = 100) -> list[Trace]:
+    def preview_hypotheses(
+        self, insights_run_id: str, max_traces: int = 100
+    ) -> list[Trace]:
         """
         Get actual trace objects for all hypotheses in a run.
 
@@ -1018,7 +1073,9 @@ class InsightsClient:
         hypotheses = self.list_hypotheses(insights_run_id)
 
         for hypothesis_summary in hypotheses:
-            hypothesis = self.get_hypothesis(insights_run_id, hypothesis_summary.hypothesis_id)
+            hypothesis = self.get_hypothesis(
+                insights_run_id, hypothesis_summary.hypothesis_id
+            )
             if hypothesis:
                 all_trace_ids.update(hypothesis.trace_ids)
 

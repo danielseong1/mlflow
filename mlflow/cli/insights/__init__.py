@@ -919,3 +919,260 @@ def update_baseline_census(
     except Exception as e:
         click.echo(f"Error updating baseline census: {e}", err=True)
         raise click.Abort()
+
+# ============================================================================
+# Analysis Report Commands
+# ============================================================================
+
+@commands.command("create-analysis-report")
+@click.option("--filepath", type=click.Path(), required=True, help="Path to save the markdown report")
+@click.option("--agent-name", type=click.STRING, required=True, help="Name of the agent being analyzed")
+@click.option("--agent-overview", type=click.STRING, required=True, help="Overview description of the agent")
+def create_analysis_report(
+    filepath: str,
+    agent_name: str,
+    agent_overview: str
+) -> None:
+    """
+    Create a new analysis report markdown file with template structure.
+
+    Example:
+        mlflow insights create-analysis-report \
+            --filepath experiment_analysis.md \
+            --agent-name "Databricks Infrastructure Assistant" \
+            --agent-overview "An infrastructure troubleshooting agent that helps users..."
+    """
+    from mlflow.insights.report import AnalysisReportManager
+
+    manager = AnalysisReportManager(filepath)
+    manager.create_report(
+        agent_name=agent_name,
+        agent_overview=agent_overview
+    )
+
+    click.echo(f"Created analysis report: {filepath}")
+
+
+@commands.command("add-report-issue")
+@click.option("--filepath", type=click.Path(exists=True), required=True, help="Path to the analysis report")
+@click.option("--category", type=click.Choice(["operational", "quality"]), required=True, help="Issue category")
+@click.option("--title", type=click.STRING, required=True, help="Issue title")
+@click.option("--finding", type=click.STRING, required=True, help="One-sentence summary of the finding")
+@click.option("--evidence", type=click.STRING, required=True, help="Evidence as JSON array of objects")
+@click.option("--root-cause", type=click.STRING, required=True, help="Explanation of why the issue occurs")
+@click.option("--impact", type=click.STRING, required=True, help="Quantified impact description")
+def add_report_issue(
+    filepath: str,
+    category: str,
+    title: str,
+    finding: str,
+    evidence: str,
+    root_cause: str,
+    impact: str
+) -> None:
+    """
+    Add an issue to an analysis report.
+
+    Evidence format (same for both operational and quality issues):
+        [
+            {
+                "trace_id": "tr-123",
+                "latency_ms": 62128,  # Optional - include for operational issues
+                "request": "monitor latency for atlanta",
+                "response": "I've checked the warehouse but could not find...",
+                "rationale": "Shows agent hit max iterations (31 tool calls) searching for non-existent resource. Tools called: list_schemas (200ms), execute_sql (45s). No existence check performed before search loop."
+            },
+            {
+                "trace_id": "tr-456",
+                "request": "find tables with customer data",
+                "response": "Based on the information I can access, here are...",
+                "rationale": "Response contains 10+ uncertainty markers ('Based on', 'I can', 'might') despite having definitive data. Undermines user confidence."
+            }
+        ]
+
+    IMPORTANT: The rationale field must be detailed and clearly explain:
+    - Which specific parts of the trace support the hypothesis
+    - What behaviors or patterns demonstrate the issue
+    - How this trace exemplifies the problem being documented
+
+    Example:
+        mlflow insights add-report-issue \
+            --filepath experiment_analysis.md \
+            --category operational \
+            --title "Agent Iteration Loops" \
+            --finding "Agent hits max iteration limits when unable to find resources" \
+            --evidence '[{"trace_id": "tr-123", "latency_ms": 62128, "request": "...", "response": "...", "rationale": "Shows agent hit max iterations..."}]' \
+            --root-cause "Agent lacks resource existence validation..." \
+            --impact "6+ traces identified with 39-62 second delays"
+    """
+    from mlflow.insights.report import AnalysisReportManager
+
+    # Parse evidence JSON
+    try:
+        evidence_list = json.loads(evidence)
+        if not isinstance(evidence_list, list):
+            raise click.UsageError("Evidence must be a JSON array")
+    except json.JSONDecodeError as e:
+        raise click.UsageError(f"Invalid JSON in evidence: {e}")
+
+    manager = AnalysisReportManager(filepath)
+    manager.add_issue(
+        category=category,
+        title=title,
+        finding=finding,
+        evidence=evidence_list,
+        root_cause=root_cause,
+        impact=impact
+    )
+
+    click.echo(f"Added {category} issue to report: {title}")
+
+
+@commands.command("add-report-strength")
+@click.option("--filepath", type=click.Path(exists=True), required=True, help="Path to the analysis report")
+@click.option("--title", type=click.STRING, required=True, help="Strength title")
+@click.option("--description", type=click.STRING, required=True, help="Description of what's working well")
+@click.option("--evidence", type=click.STRING, required=True, help="Evidence as JSON array with trace examples and metrics")
+def add_report_strength(
+    filepath: str,
+    title: str,
+    description: str,
+    evidence: str
+) -> None:
+    """
+    Add a strength/success to an analysis report.
+
+    Evidence format:
+        [
+            "99.95% success rate (only 9 errors in 17,405 traces)",
+            "Consistent performance across 3-month period",
+            "Example: tr-f5d69059 completed in 4,867ms"
+        ]
+
+    Example:
+        mlflow insights add-report-strength \
+            --filepath experiment_analysis.md \
+            --title "Excellent Reliability" \
+            --description "Agent demonstrates consistent high reliability" \
+            --evidence '["99.95% success rate", "No degradation over time"]'
+    """
+    from mlflow.insights.report import AnalysisReportManager
+
+    # Parse evidence JSON
+    try:
+        evidence_list = json.loads(evidence)
+        if not isinstance(evidence_list, list):
+            raise click.UsageError("Evidence must be a JSON array")
+    except json.JSONDecodeError as e:
+        raise click.UsageError(f"Invalid JSON in evidence: {e}")
+
+    manager = AnalysisReportManager(filepath)
+    manager.add_strength(
+        title=title,
+        description=description,
+        evidence=evidence_list
+    )
+
+    click.echo(f"Added strength to report: {title}")
+
+
+@commands.command("add-report-refuted")
+@click.option("--filepath", type=click.Path(exists=True), required=True, help="Path to the analysis report")
+@click.option("--hypothesis", type=click.STRING, required=True, help="Refuted hypothesis statement")
+@click.option("--reason", type=click.STRING, required=True, help="Brief explanation of why it was refuted")
+def add_report_refuted(
+    filepath: str,
+    hypothesis: str,
+    reason: str
+) -> None:
+    """
+    Add a refuted hypothesis to an analysis report.
+
+    Example:
+        mlflow insights add-report-refuted \
+            --filepath experiment_analysis.md \
+            --hypothesis "High latency caused by network issues" \
+            --reason "Investigation showed latency correlates with tool count, not network"
+    """
+    from mlflow.insights.report import AnalysisReportManager
+
+    manager = AnalysisReportManager(filepath)
+    manager.add_refuted_hypothesis(
+        hypothesis=hypothesis,
+        reason=reason
+    )
+
+    click.echo(f"Added refuted hypothesis to report")
+
+
+@commands.command("finalize-report")
+@click.option("--filepath", type=click.Path(exists=True), required=True, help="Path to the analysis report")
+@click.option("--executive-summary", type=click.STRING, required=True, help="Executive summary paragraph")
+@click.option("--statistics", type=click.STRING, required=True, help="Summary statistics as JSON object")
+@click.option("--recommendations", type=click.STRING, required=True, help="Recommendations as JSON object with priority categories")
+@click.option("--conclusion", type=click.STRING, required=True, help="Conclusion paragraph")
+def finalize_report(
+    filepath: str,
+    executive_summary: str,
+    statistics: str,
+    recommendations: str,
+    conclusion: str
+) -> None:
+    """
+    Finalize an analysis report by filling in summary sections.
+
+    Statistics format:
+        {
+            "total_traces": 17405,
+            "success_rate": "99.95%",
+            "p50_latency": "27,867ms",
+            "p90_latency": "48,515ms",
+            "p95_latency": "58,522ms",
+            "p99_latency": "82,909ms",
+            "max_latency": "1,252,525ms",
+            "analysis_period": "June 27, 2025 - September 30, 2025"
+        }
+
+    Recommendations format:
+        {
+            "immediate_actions": [
+                "Implement resource existence checks",
+                "Fix code bugs causing AttributeErrors"
+            ],
+            "performance_improvements": [
+                "Enable parallel tool execution"
+            ],
+            "quality_enhancements": [
+                "Adjust response generation"
+            ],
+            "monitoring_recommendations": [
+                "Track iteration counts per trace"
+            ]
+        }
+
+    Example:
+        mlflow insights finalize-report \
+            --filepath experiment_analysis.md \
+            --executive-summary "Analysis of 17,405 traces reveals..." \
+            --statistics '{"total_traces": 17405, ...}' \
+            --recommendations '{"immediate_actions": [...], ...}' \
+            --conclusion "The agent demonstrates strong reliability..."
+    """
+    from mlflow.insights.report import AnalysisReportManager
+
+    # Parse JSON inputs
+    try:
+        statistics_dict = json.loads(statistics)
+        recommendations_dict = json.loads(recommendations)
+    except json.JSONDecodeError as e:
+        raise click.UsageError(f"Invalid JSON: {e}")
+
+    manager = AnalysisReportManager(filepath)
+    manager.finalize_report(
+        executive_summary=executive_summary,
+        statistics=statistics_dict,
+        recommendations=recommendations_dict,
+        conclusion=conclusion
+    )
+
+    click.echo(f"Finalized analysis report: {filepath}")

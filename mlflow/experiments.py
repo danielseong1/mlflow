@@ -54,12 +54,30 @@ def create(experiment_name, artifact_location):
     help="Select view type for experiments. Valid view types are "
     "'active_only' (default), 'deleted_only', and 'all'.",
 )
-def search_experiments(view):
+@click.option(
+    "--max-results",
+    type=click.INT,
+    help="Maximum number of experiments to return. If not specified, returns all matching experiments.",
+)
+def search_experiments(view, max_results):
     """
     Search for experiments in the configured tracking server.
+
+    \b
+    Examples:
+    # Search all active experiments
+    mlflow experiments search
+
+    \b
+    # Search with maximum results limit
+    mlflow experiments search --max-results 10
+
+    \b
+    # Search deleted experiments
+    mlflow experiments search --view deleted_only
     """
     view_type = ViewType.from_string(view) if view else ViewType.ACTIVE_ONLY
-    experiments = mlflow.search_experiments(view_type=view_type)
+    experiments = mlflow.search_experiments(view_type=view_type, max_results=max_results)
     table = [
         [
             exp.experiment_id,
