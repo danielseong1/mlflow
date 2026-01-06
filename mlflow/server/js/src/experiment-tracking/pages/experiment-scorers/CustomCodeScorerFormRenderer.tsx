@@ -75,20 +75,21 @@ const CustomCodeScorerFormRenderer: React.FC<CustomCodeScorerFormRendererProps> 
     const step1Code = `pip install --upgrade "mlflow>=3.1.0"`;
 
     const step2Code = `from mlflow.genai.scorers import scorer, ScorerSamplingConfig
-from typing import Optional, Any
-from mlflow.entities import Feedback
-import mlflow.entities
+from typing import Any
+from mlflow.entities import Feedback, Trace
 
 @scorer
 def my_custom_scorer(
-  inputs: Optional[dict[str, Any]],  # The agent's raw input, parsed from the Trace or dataset, as a Python dict
-  outputs: Optional[Any],  # The agent's raw output, parsed from the Trace or dataset
-  expectations: Optional[dict[str, Any]],  # The expectations passed to evaluate(data=...), as a Python dict
-  trace: Optional[mlflow.entities.Trace]  # The app's resulting Trace containing spans and other metadata
-) -> int | float | bool | str | Feedback | list[Feedback]:
+  *,
+  inputs: dict[str, Any],  # The agent's raw input, parsed from the Trace or dataset, as a Python dict
+  outputs: Any,  # The agent's raw output, parsed from the Trace or dataset
+  expectations: dict[str, Any],  # The expectations passed to evaluate(data=...), as a Python dict
+  trace: Trace  # The app's resulting Trace containing spans and other metadata
+) -> float | bool | str | Feedback | list[Feedback]:
     """
     Custom scorer template - implement your scoring logic here.
-    Return a score as int, float, bool, str, or Feedback object(s).
+    All parameters are optional; declare only what your scorer needs.
+    Return a score as float, bool, str, or Feedback object(s).
     """
     # TODO: Implement your custom scoring logic
     return 1.0`;
